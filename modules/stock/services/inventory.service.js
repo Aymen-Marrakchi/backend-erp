@@ -105,15 +105,27 @@ exports.addInventoryLine = async ({
   });
 };
 
+const EDITABLE_INVENTORY_STATUSES = ["DRAFT", "IN_PROGRESS"];
+
 exports.submitInventoryForApproval = async (inventoryCountId) => {
   const inventory = await InventoryCount.findById(inventoryCountId);
   if (!inventory) {
     throw Object.assign(new Error("Inventory session not found"), { statusCode: 404 });
   }
 
+  if (!EDITABLE_INVENTORY_STATUSES.includes(inventory.status)) {
+    throw Object.assign(
+      new Error("Session already submitted or closed and cannot be submitted again."),
+      { statusCode: 400 }
+    );
+  }
+
   const lineCount = await InventoryCountLine.countDocuments({ inventoryCountId });
   if (lineCount === 0) {
-    throw Object.assign(new Error("Cannot submit empty inventory session"), { statusCode: 400 });
+    throw Object.assign(
+      new Error("Cannot submit empty inventory session. Add at least one count line first."),
+      { statusCode: 400 }
+    );
   }
 
   inventory.status = "PENDING_APPROVAL";
