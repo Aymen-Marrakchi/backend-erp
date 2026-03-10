@@ -15,26 +15,27 @@ exports.getProductById = async (id) => {
 exports.createProduct = async ({
   sku,
   name,
-  description = "",
-  category = "",
+  type,
   unit,
   isLotTracked = false,
   status = "ACTIVE",
+  purchasePrice = 0,
   createdBy = null,
 }) => {
-  const exists = await Product.findOne({ sku: sku.trim().toUpperCase() });
+  const code = sku.trim().toUpperCase();
+  const exists = await Product.findOne({ sku: code });
   if (exists) {
     throw Object.assign(new Error("SKU already exists"), { statusCode: 400 });
   }
 
   return Product.create({
-    sku: sku.trim().toUpperCase(),
+    sku: code,
     name,
-    description,
-    category,
+    type,
     unit,
     isLotTracked,
     status,
+    purchasePrice,
     createdBy,
     updatedBy: createdBy,
   });
@@ -42,7 +43,7 @@ exports.createProduct = async ({
 
 exports.updateProduct = async (
   id,
-  { sku, name, description, category, unit, isLotTracked, status, updatedBy = null }
+  { sku, name, type, unit, isLotTracked, status, purchasePrice, updatedBy = null }
 ) => {
   const product = await Product.findById(id);
   if (!product) {
@@ -50,22 +51,23 @@ exports.updateProduct = async (
   }
 
   if (sku && sku.trim().toUpperCase() !== product.sku) {
+    const code = sku.trim().toUpperCase();
     const exists = await Product.findOne({
-      sku: sku.trim().toUpperCase(),
+      sku: code,
       _id: { $ne: id },
     });
     if (exists) {
       throw Object.assign(new Error("SKU already exists"), { statusCode: 400 });
     }
-    product.sku = sku.trim().toUpperCase();
+    product.sku = code;
   }
 
   if (name !== undefined) product.name = name;
-  if (description !== undefined) product.description = description;
-  if (category !== undefined) product.category = category;
+  if (type !== undefined) product.type = type;
   if (unit !== undefined) product.unit = unit;
   if (isLotTracked !== undefined) product.isLotTracked = isLotTracked;
   if (status !== undefined) product.status = status;
+  if (purchasePrice !== undefined) product.purchasePrice = purchasePrice;
   product.updatedBy = updatedBy;
 
   await product.save();

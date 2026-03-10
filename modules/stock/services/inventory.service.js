@@ -1,9 +1,9 @@
 const InventoryCount = require("../models/inventory-count.model");
 const InventoryCountLine = require("../models/inventory-count-line.model");
-const StockAdjustment = require("../models/stock-adjustment.model");
 const StockItem = require("../models/stock-item.model");
 const StockMovement = require("../models/stock-movement.model");
 const Product = require("../models/product.model");
+const Depot = require("../models/depot.model");
 const stockAlertService = require("./stock-alert.service");
 const stockEventService = require("./stock-event.service");
 
@@ -16,26 +16,29 @@ const generateInventoryCode = () => {
   return `INV-${y}${m}${d}-${t}`;
 };
 
-exports.getAllInventories = async () => {
-  return InventoryCount.find()
+exports.getAllInventories = async ({ userId, role } = {}) => {
+  let filter = {};
+  if (role === "DEPOT_MANAGER" && userId) {
+    const depot = await Depot.findOne({ managerId: userId });
+    if (depot) filter.depotId = depot._id;
+    else return [];
+  }
+  return InventoryCount.find(filter)
     .populate("startedBy", "name email role")
-    .populate("approvedBy", "name email role")
+    .populate("depotId", "name address")
     .sort({ createdAt: -1 });
 };
 
 exports.getInventoryById = async (id) => {
   const inventory = await InventoryCount.findById(id)
     .populate("startedBy", "name email role")
-    .populate("approvedBy", "name email role");
-
-  if (!inventory) {
-    throw Object.assign(new Error("Inventory session not found"), { statusCode: 404 });
-  }
-
+    .populate("depotId", "name address");
+  if (!inventory) throw Object.assign(new Error("Inventory session not found"), { statusCode: 404 });
   return inventory;
 };
 
-exports.createInventory = async ({ type, notes = "", startedBy = null }) => {
+exports.createInventory = async ({ type, notes = "", startedBy = null, depotId = null }) => {
+  if (!depotId) throw Object.assign(new Error("A depot must be selected"), { statusCode: 400 });
   return InventoryCount.create({
     code: generateInventoryCode(),
     type,
@@ -43,6 +46,7 @@ exports.createInventory = async ({ type, notes = "", startedBy = null }) => {
     startedBy,
     startedAt: new Date(),
     notes,
+    depotId,
   });
 };
 
@@ -50,221 +54,141 @@ exports.getInventoryLines = async (inventoryCountId) => {
   return InventoryCountLine.find({ inventoryCountId })
     .populate("productId")
     .populate("countedBy", "name email role")
+    .populate("approvedBy", "name email role")
+    .populate("reasonHistory.addedBy", "name email role")
     .sort({ createdAt: -1 });
 };
 
-exports.addInventoryLine = async ({
-  inventoryCountId,
-  productId,
-  countedQuantity,
-  lotRef = "",
-  notes = "",
-  countedBy = null,
-}) => {
+exports.addInventoryLine = async ({ inventoryCountId, productId, countedQuantity, lotRef = "", notes = "", countedBy = null }) => {
   const qty = Number(countedQuantity);
-  if (Number.isNaN(qty) || qty < 0) {
-    throw Object.assign(new Error("countedQuantity must be a non-negative number"), { statusCode: 400 });
-  }
-
+  if (Number.isNaN(qty) || qty < 0) throw Object.assign(new Error("countedQuantity must be a non-negative number"), { statusCode: 400 });
   const inventory = await InventoryCount.findById(inventoryCountId);
-  if (!inventory) {
-    throw Object.assign(new Error("Inventory session not found"), { statusCode: 404 });
-  }
-
-  if (!["IN_PROGRESS", "DRAFT"].includes(inventory.status)) {
-    throw Object.assign(new Error("Inventory session is not editable"), { statusCode: 400 });
-  }
-
+  if (!inventory) throw Object.assign(new Error("Inventory session not found"), { statusCode: 404 });
+  if (inventory.status !== "IN_PROGRESS") throw Object.assign(new Error("Lines can only be added while session is IN_PROGRESS"), { statusCode: 400 });
   const product = await Product.findById(productId);
-  if (!product) {
-    throw Object.assign(new Error("Product not found"), { statusCode: 404 });
-  }
-
+  if (!product) throw Object.assign(new Error("Product not found"), { statusCode: 404 });
+  const existing = await InventoryCountLine.findOne({ inventoryCountId, productId });
+  if (existing) throw Object.assign(new Error("This product already has a count line in this session"), { statusCode: 400 });
   const stockItem = await StockItem.findOne({ productId });
   const systemQuantity = stockItem ? stockItem.quantityOnHand : 0;
-
-  const existing = await InventoryCountLine.findOne({ inventoryCountId, productId });
-  if (existing) {
-    throw Object.assign(new Error("This product already has a count line in the session"), { statusCode: 400 });
-  }
-
-  const varianceQuantity = qty - Number(systemQuantity);
-  const status = varianceQuantity === 0 ? "VALIDATED" : "VARIANCE_FOUND";
-
   return InventoryCountLine.create({
-    inventoryCountId,
-    productId,
-    systemQuantity,
-    countedQuantity: qty,
-    varianceQuantity,
-    status,
-    lotRef,
-    notes,
-    countedBy,
-    countedAt: new Date(),
+    inventoryCountId, productId, systemQuantity,
+    countedQuantity: qty, lotRef, notes,
+    status: "PENDING", countedBy, countedAt: new Date(),
   });
 };
 
-const EDITABLE_INVENTORY_STATUSES = ["DRAFT", "IN_PROGRESS"];
-
-exports.submitInventoryForApproval = async (inventoryCountId) => {
+exports.sendToDepot = async (inventoryCountId) => {
   const inventory = await InventoryCount.findById(inventoryCountId);
-  if (!inventory) {
-    throw Object.assign(new Error("Inventory session not found"), { statusCode: 404 });
-  }
-
-  if (!EDITABLE_INVENTORY_STATUSES.includes(inventory.status)) {
-    throw Object.assign(
-      new Error("Session already submitted or closed and cannot be submitted again."),
-      { statusCode: 400 }
-    );
-  }
-
+  if (!inventory) throw Object.assign(new Error("Inventory session not found"), { statusCode: 404 });
+  if (inventory.status !== "IN_PROGRESS") throw Object.assign(new Error("Session must be IN_PROGRESS to send to depot"), { statusCode: 400 });
   const lineCount = await InventoryCountLine.countDocuments({ inventoryCountId });
-  if (lineCount === 0) {
-    throw Object.assign(
-      new Error("Cannot submit empty inventory session. Add at least one count line first."),
-      { statusCode: 400 }
-    );
-  }
-
-  inventory.status = "PENDING_APPROVAL";
+  if (lineCount === 0) throw Object.assign(new Error("Add at least one count line before sending to depot"), { statusCode: 400 });
+  inventory.status = "SENT_TO_DEPOT";
   await inventory.save();
-
   return inventory;
 };
 
-exports.createAdjustmentFromLine = async ({
-  inventoryCountLineId,
-  reason,
-  requestedBy = null,
-}) => {
-  const line = await InventoryCountLine.findById(inventoryCountLineId);
-  if (!line) {
-    throw Object.assign(new Error("Inventory count line not found"), { statusCode: 404 });
-  }
-
-  if (line.varianceQuantity === 0) {
-    throw Object.assign(new Error("No variance found on this line"), { statusCode: 400 });
-  }
-
-  const existing = await StockAdjustment.findOne({ inventoryCountLineId });
-  if (existing) {
-    throw Object.assign(new Error("Adjustment already exists for this line"), { statusCode: 400 });
-  }
-
-  return StockAdjustment.create({
-    inventoryCountId: line.inventoryCountId,
-    inventoryCountLineId: line._id,
-    productId: line.productId,
-    systemQuantity: line.systemQuantity,
-    countedQuantity: line.countedQuantity,
-    deltaQuantity: line.varianceQuantity,
-    reason,
-    requestedBy,
-    status: "PENDING_APPROVAL",
-  });
-};
-
-exports.getAllAdjustments = async () => {
-  return StockAdjustment.find()
+exports.addDepotReason = async ({ lineId, reason, userId }) => {
+  const line = await InventoryCountLine.findById(lineId).populate("inventoryCountId");
+  if (!line) throw Object.assign(new Error("Line not found"), { statusCode: 404 });
+  const session = line.inventoryCountId;
+  if (!["SENT_TO_DEPOT", "PENDING_APPROVAL"].includes(session.status))
+    throw Object.assign(new Error("Session is not open for depot review"), { statusCode: 400 });
+  if (!["PENDING", "REJECTED"].includes(line.status))
+    throw Object.assign(new Error("This line is not waiting for a depot reason"), { statusCode: 400 });
+  line.depotReason = reason.trim();
+  line.reasonHistory.push({ reason: reason.trim(), addedBy: userId, action: "DEPOT_REASON" });
+  line.status = "REVIEWED";
+  await line.save();
+  return InventoryCountLine.findById(line._id)
     .populate("productId")
-    .populate("requestedBy", "name email role")
-    .populate("approvedBy", "name email role")
-    .populate("appliedBy", "name email role")
-    .sort({ createdAt: -1 });
+    .populate("countedBy", "name role")
+    .populate("approvedBy", "name role")
+    .populate("reasonHistory.addedBy", "name role");
 };
 
-exports.updateAdjustmentStatus = async ({ id, status, userId = null }) => {
-  const adjustment = await StockAdjustment.findById(id);
-  if (!adjustment) {
-    throw Object.assign(new Error("Stock adjustment not found"), { statusCode: 404 });
-  }
+exports.submitDepotReview = async (inventoryCountId) => {
+  const inventory = await InventoryCount.findById(inventoryCountId);
+  if (!inventory) throw Object.assign(new Error("Inventory session not found"), { statusCode: 404 });
+  if (inventory.status !== "SENT_TO_DEPOT") throw Object.assign(new Error("Session must be SENT_TO_DEPOT to submit review"), { statusCode: 400 });
+  const lines = await InventoryCountLine.find({ inventoryCountId });
+  const unreviewed = lines.filter((l) => !["REVIEWED", "APPROVED"].includes(l.status));
+  if (unreviewed.length > 0) throw Object.assign(new Error(`${unreviewed.length} line(s) still need a reason before submitting`), { statusCode: 400 });
+  inventory.status = "PENDING_APPROVAL";
+  await inventory.save();
+  return inventory;
+};
 
-  if (status === "APPROVED") {
-    adjustment.status = "APPROVED";
-    adjustment.approvedBy = userId;
-    adjustment.approvedAt = new Date();
-    await adjustment.save();
-    return adjustment;
-  }
+exports.approveInventoryLine = async ({ lineId, userId }) => {
+  const line = await InventoryCountLine.findById(lineId).populate("inventoryCountId");
+  if (!line) throw Object.assign(new Error("Line not found"), { statusCode: 404 });
+  const session = line.inventoryCountId;
+  if (session.status === "CLOSED") throw Object.assign(new Error("Session is already closed"), { statusCode: 400 });
+  if (session.status === "IN_PROGRESS") throw Object.assign(new Error("Session must be sent to depot first"), { statusCode: 400 });
+  if (line.status !== "REVIEWED") throw Object.assign(new Error("Line must be REVIEWED before approval"), { statusCode: 400 });
 
-  if (status === "REJECTED") {
-    adjustment.status = "REJECTED";
-    adjustment.approvedBy = userId;
-    adjustment.approvedAt = new Date();
-    await adjustment.save();
-    return adjustment;
-  }
-
-  if (status === "APPLIED") {
-    if (adjustment.status !== "APPROVED") {
-      throw Object.assign(new Error("Only approved adjustments can be applied"), { statusCode: 400 });
-    }
-
-    let stockItem = await StockItem.findOne({ productId: adjustment.productId });
+  if (line.varianceQuantity !== 0) {
+    let stockItem = await StockItem.findOne({ productId: line.productId });
     if (!stockItem) {
-      stockItem = await StockItem.create({
-        productId: adjustment.productId,
-        quantityOnHand: 0,
-        quantityReserved: 0,
-        quantityAvailable: 0,
-        status: "ACTIVE",
-      });
+      stockItem = await StockItem.create({ productId: line.productId, quantityOnHand: 0, quantityReserved: 0, quantityAvailable: 0, status: "ACTIVE" });
     }
-
     const previousOnHand = stockItem.quantityOnHand;
     const previousReserved = stockItem.quantityReserved;
-
-    stockItem.quantityOnHand = adjustment.countedQuantity;
+    stockItem.quantityOnHand = line.countedQuantity;
     stockItem.lastMovementAt = new Date();
     await stockItem.save();
-
     const movement = await StockMovement.create({
-      productId: adjustment.productId,
-      type: "ADJUSTMENT",
-      quantity: Math.abs(adjustment.deltaQuantity),
-      previousOnHand,
-      newOnHand: stockItem.quantityOnHand,
-      previousReserved,
-      newReserved: stockItem.quantityReserved,
-      sourceModule: "STOCK",
-      sourceType: "INVENTORY_ADJUSTMENT",
-      sourceId: String(adjustment._id),
-      reference: "",
-      reason: adjustment.reason,
-      notes: "",
-      status: "POSTED",
-      createdBy: adjustment.requestedBy || userId,
-      approvedBy: adjustment.approvedBy || userId,
-      approvedAt: adjustment.approvedAt || new Date(),
+      productId: line.productId, type: "ADJUSTMENT",
+      quantity: Math.abs(line.varianceQuantity),
+      previousOnHand, newOnHand: stockItem.quantityOnHand,
+      previousReserved, newReserved: stockItem.quantityReserved,
+      sourceModule: "STOCK", sourceType: "INVENTORY_ADJUSTMENT",
+      sourceId: String(line._id), reference: session.code,
+      reason: line.depotReason, notes: "", status: "POSTED",
+      createdBy: userId, approvedBy: userId, approvedAt: new Date(),
     });
-
-    adjustment.status = "APPLIED";
-    adjustment.appliedBy = userId;
-    adjustment.appliedAt = new Date();
-    await adjustment.save();
-
-    await stockAlertService.evaluateThreshold({
-      productId: adjustment.productId,
-      triggeredByMovementId: movement._id,
-    });
-
-    await stockEventService.createIntegrationEvent({
-      eventType: "STOCK_ADJUSTED",
-      aggregateType: "StockAdjustment",
-      aggregateId: adjustment._id,
-      sourceModule: "STOCK",
-      sourceId: String(adjustment._id),
-      payload: {
-        productId: adjustment.productId,
-        deltaQuantity: adjustment.deltaQuantity,
-        countedQuantity: adjustment.countedQuantity,
-      },
-    });
-
-    return adjustment;
+    await stockAlertService.evaluateThreshold({ productId: line.productId, triggeredByMovementId: movement._id });
   }
 
-  throw Object.assign(new Error("Invalid adjustment status"), { statusCode: 400 });
+  line.status = "APPROVED";
+  line.approvedBy = userId;
+  line.approvedAt = new Date();
+  line.reasonHistory.push({ reason: "Approved by stock manager", addedBy: userId, action: "APPROVED" });
+  await line.save();
+
+  const pendingCount = await InventoryCountLine.countDocuments({ inventoryCountId: session._id, status: { $ne: "APPROVED" } });
+  if (pendingCount === 0) {
+    session.status = "CLOSED";
+    session.closedAt = new Date();
+    await session.save();
+    // Fire-and-forget: don't let integration event failure block the response
+    stockEventService.createIntegrationEvent({
+      eventType: "INVENTORY_CLOSED", aggregateType: "InventoryCount", aggregateId: session._id,
+      sourceModule: "STOCK", sourceId: String(session._id),
+      payload: { depotId: session.depotId, code: session.code },
+    }).catch((e) => console.error("IntegrationEvent error:", e.message));
+  }
+
+  return InventoryCountLine.findById(line._id)
+    .populate("productId")
+    .populate("approvedBy", "name role")
+    .populate("reasonHistory.addedBy", "name role");
+};
+
+exports.rejectInventoryLine = async ({ lineId, userId }) => {
+  const line = await InventoryCountLine.findById(lineId).populate("inventoryCountId");
+  if (!line) throw Object.assign(new Error("Line not found"), { statusCode: 404 });
+  const session = line.inventoryCountId;
+  if (session.status === "CLOSED") throw Object.assign(new Error("Session is already closed"), { statusCode: 400 });
+  if (session.status === "IN_PROGRESS") throw Object.assign(new Error("Session must be sent to depot first"), { statusCode: 400 });
+  if (line.status !== "REVIEWED") throw Object.assign(new Error("Line must be REVIEWED to be rejected"), { statusCode: 400 });
+  line.status = "REJECTED";
+  line.depotReason = "";
+  line.reasonHistory.push({ reason: "Rejected by stock manager", addedBy: userId, action: "REJECTED" });
+  await line.save();
+  // Session stays PENDING_APPROVAL — depot manager can re-add a reason directly
+  return InventoryCountLine.findById(line._id)
+    .populate("productId")
+    .populate("reasonHistory.addedBy", "name role");
 };

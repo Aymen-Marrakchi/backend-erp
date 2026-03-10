@@ -1,5 +1,6 @@
 const { protect, requireRole } = require("../../../hooks/auth.hook");
 const stockController = require("../controllers/stock.controller");
+const depotController = require("../controllers/depot.controller");
 const {
   objectIdParam,
   entryBody,
@@ -11,7 +12,16 @@ const {
 
 async function stockRoutes(fastify) {
   const adminOnly = [protect, requireRole("ADMIN")];
-  const stockAccess = [protect , requireRole("STOCK_MANAGER")]; // later you can replace with STOCK_MANAGER, ADMIN, etc.
+  const stockAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER")];
+  const stockOrDepot = [protect, requireRole("ADMIN", "STOCK_MANAGER", "DEPOT_MANAGER")];
+  const depotAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER", "DEPOT_MANAGER")];
+
+  // Returns users with DEPOT_MANAGER role — used by STOCK_MANAGER when creating/editing depots
+  fastify.get(
+    "/depot-managers",
+    { preHandler: stockAccess },
+    depotController.getDepotManagers
+  );
 
   fastify.get(
     "/items",
@@ -27,25 +37,25 @@ async function stockRoutes(fastify) {
 
   fastify.get(
     "/movements",
-    { preHandler: stockAccess, schema: { tags: ["Stock"] } },
+    { preHandler: stockOrDepot, schema: { tags: ["Stock"] } },
     stockController.getAllMovements
   );
 
   fastify.get(
     "/movements/:productId",
-    { preHandler: stockAccess, schema: { params: objectIdParam, tags: ["Stock"] } },
+    { preHandler: stockOrDepot, schema: { params: objectIdParam, tags: ["Stock"] } },
     stockController.getMovementHistory
   );
 
   fastify.post(
     "/movements/entry",
-    { preHandler: stockAccess, schema: { body: entryBody, tags: ["Stock"] } },
+    { preHandler: depotAccess, schema: { body: entryBody, tags: ["Stock"] } },
     stockController.createEntry
   );
 
   fastify.post(
     "/movements/exit",
-    { preHandler: stockAccess, schema: { body: exitBody, tags: ["Stock"] } },
+    { preHandler: depotAccess, schema: { body: exitBody, tags: ["Stock"] } },
     stockController.createExit
   );
 

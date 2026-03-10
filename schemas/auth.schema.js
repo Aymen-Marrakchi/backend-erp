@@ -7,7 +7,7 @@ const registerBody = {
     name:       { type: "string", minLength: 2 },
     email:      { type: "string", format: "email" },
     password:   { type: "string", minLength: 6 },
-    role:       { type: "string", enum: ["ADMIN", "HR_MANAGER", "MARKETING_MANAGER", "SALES_MANAGER", "STOCK_MANAGER", "COMMERCIAL_MANAGER", "FINANCE_MANAGER", "PURCHASE_MANAGER", "EMPLOYEE"] },
+    role:       { type: "string", enum: ["ADMIN", "HR_MANAGER", "MARKETING_MANAGER", "SALES_MANAGER", "STOCK_MANAGER", "DEPOT_MANAGER", "COMMERCIAL_MANAGER", "FINANCE_MANAGER", "PURCHASE_MANAGER", "EMPLOYEE"] },
     department: { type: "string", enum: ["HR", "Marketing", "Online Sales", "Stock", "Commercial", "Finance", "Purchase", "None"] },
   },
 };

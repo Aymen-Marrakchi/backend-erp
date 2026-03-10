@@ -8,15 +8,21 @@ const idParam = {
 
 const createProductBody = {
   type: "object",
-  required: ["sku", "name", "unit"],
+  required: ["sku", "name", "type", "unit"],
   properties: {
     sku: { type: "string", minLength: 1 },
     name: { type: "string", minLength: 2 },
-    description: { type: "string", default: "" },
-    category: { type: "string", default: "" },
-    unit: { type: "string", minLength: 1 },
-    isLotTracked: { type: "boolean", default: false },
-    status: { type: "string", enum: ["ACTIVE", "INACTIVE"], default: "ACTIVE" },
+    type: {
+      type: "string",
+      enum: ["PRODUIT_FINI", "SOUS_ENSEMBLE", "COMPOSANT", "MATIERE_PREMIERE"],
+    },
+    unit: {
+      type: "string",
+      enum: ["pcs", "kg", "l", "m"],
+    },
+    isLotTracked: { type: "boolean" },
+    status: { type: "string", enum: ["ACTIVE", "INACTIVE"] },
+    purchasePrice: { type: "number", minimum: 0 },
   },
 };
 
@@ -25,11 +31,17 @@ const updateProductBody = {
   properties: {
     sku: { type: "string", minLength: 1 },
     name: { type: "string", minLength: 2 },
-    description: { type: "string" },
-    category: { type: "string" },
-    unit: { type: "string", minLength: 1 },
+    type: {
+      type: "string",
+      enum: ["PRODUIT_FINI", "SOUS_ENSEMBLE", "COMPOSANT", "MATIERE_PREMIERE"],
+    },
+    unit: {
+      type: "string",
+      enum: ["pcs", "kg", "l", "m"],
+    },
     isLotTracked: { type: "boolean" },
     status: { type: "string", enum: ["ACTIVE", "INACTIVE"] },
+    purchasePrice: { type: "number", minimum: 0 },
   },
 };
 

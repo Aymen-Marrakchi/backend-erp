@@ -8,7 +8,18 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: [true, "Password is required"], minlength: 6 },
     role: {
       type: String,
-      enum: ["ADMIN", "HR_MANAGER", "MARKETING_MANAGER", "SALES_MANAGER", "STOCK_MANAGER", "COMMERCIAL_MANAGER", "FINANCE_MANAGER", "PURCHASE_MANAGER","EMPLOYEE"],
+    enum: [
+      "ADMIN",
+      "HR_MANAGER",
+      "MARKETING_MANAGER",
+      "SALES_MANAGER",
+      "STOCK_MANAGER",
+      "DEPOT_MANAGER",
+      "COMMERCIAL_MANAGER",
+      "FINANCE_MANAGER",
+      "PURCHASE_MANAGER",
+      "EMPLOYEE",
+    ],
       default: "EMPLOYEE",
     },
     department: {

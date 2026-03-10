@@ -15,6 +15,7 @@ const createInventoryBody = {
       enum: ["PERIODIC", "PERMANENT"],
     },
     notes: { type: "string", default: "" },
+    depotId: { type: "string", minLength: 24, maxLength: 24 },
   },
 };
 
@@ -29,30 +30,27 @@ const addLineBody = {
   },
 };
 
-const createAdjustmentBody = {
+const lineIdParam = {
   type: "object",
-  required: ["inventoryCountLineId", "reason"],
+  required: ["id", "lineId"],
   properties: {
-    inventoryCountLineId: { type: "string", minLength: 24, maxLength: 24 },
-    reason: { type: "string", minLength: 2 },
+    id: { type: "string", minLength: 24, maxLength: 24 },
+    lineId: { type: "string", minLength: 24, maxLength: 24 },
   },
 };
 
-const updateAdjustmentStatusBody = {
+const depotReasonBody = {
   type: "object",
-  required: ["status"],
+  required: ["reason"],
   properties: {
-    status: {
-      type: "string",
-      enum: ["APPROVED", "REJECTED", "APPLIED"],
-    },
+    reason: { type: "string", minLength: 2 },
   },
 };
 
 module.exports = {
   idParam,
+  lineIdParam,
   createInventoryBody,
   addLineBody,
-  createAdjustmentBody,
-  updateAdjustmentStatusBody,
+  depotReasonBody,
 };

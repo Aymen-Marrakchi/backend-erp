@@ -4,30 +4,25 @@ const productSchema = new mongoose.Schema(
   {
     sku: {
       type: String,
-      required: [true, "SKU is required"],
+      required: true,
       unique: true,
       trim: true,
       uppercase: true,
     },
     name: {
       type: String,
-      required: [true, "Product name is required"],
+      required: true,
       trim: true,
     },
-    description: {
+    type: {
       type: String,
-      default: "",
-      trim: true,
-    },
-    category: {
-      type: String,
-      default: "",
-      trim: true,
+      enum: ["PRODUIT_FINI", "SOUS_ENSEMBLE", "COMPOSANT", "MATIERE_PREMIERE"],
+      required: true,
     },
     unit: {
       type: String,
-      required: [true, "Unit is required"],
-      trim: true,
+      enum: ["pcs", "kg", "l", "m"],
+      required: true,
     },
     isLotTracked: {
       type: Boolean,
@@ -38,15 +33,10 @@ const productSchema = new mongoose.Schema(
       enum: ["ACTIVE", "INACTIVE"],
       default: "ACTIVE",
     },
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      default: null,
-    },
-    updatedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      default: null,
+    purchasePrice: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
   },
   { timestamps: true }

@@ -44,8 +44,35 @@ const stockAlertSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["OPEN", "ACKNOWLEDGED", "CLOSED"],
+      enum: ["OPEN", "ACKNOWLEDGED", "PENDING", "CLOSED"],
       default: "OPEN",
+    },
+
+    actionType: {
+      type: String,
+      enum: ["PURCHASE", null],
+      default: null,
+    },
+
+    actionSourceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+
+    handledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    handledAt: {
+      type: Date,
+      default: null,
+    },
+
+    closedAt: {
+      type: Date,
+      default: null,
     },
 
     triggeredByMovementId: {

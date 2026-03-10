@@ -12,6 +12,7 @@ const integrationEventSchema = new mongoose.Schema(
         "PURCHASE_RECEIPT_POSTED",
         "SUPPLIER_RETURN_POSTED",
         "PRODUCTION_CONSUMPTION_POSTED",
+        "INVENTORY_CLOSED",
       ],
       required: true,
       index: true,
@@ -19,7 +20,7 @@ const integrationEventSchema = new mongoose.Schema(
 
     aggregateType: {
       type: String,
-      enum: ["StockItem", "StockMovement", "StockAdjustment"],
+      enum: ["StockItem", "StockMovement", "StockAdjustment", "InventoryCount"],
       required: true,
     },
 

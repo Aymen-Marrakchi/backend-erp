@@ -75,6 +75,18 @@ fastify.register(require("./modules/stock/routes/product.routes"), { prefix: "/a
 fastify.register(require("./modules/stock/routes/threshold.routes"), { prefix: "/api/stock/threshold-rules" });
 fastify.register(require("./modules/stock/routes/alert.routes"), { prefix: "/api/stock/alerts" });
 fastify.register(require("./modules/stock/routes/inventory.routes"), { prefix: "/api/stock/inventories" });
+fastify.register(require("./modules/stock/routes/depot.routes"), {
+  prefix: "/api/stock/depots",
+});
+fastify.register(require("./modules/commercial/routes/sales-order.routes"), {
+  prefix: "/api/commercial/orders",
+});
+fastify.register(require("./modules/stock/routes/sku-setting.routes"), {
+  prefix: "/api/stock/settings/sku",
+});
+fastify.register(require("./modules/purchase/routes/purchase-request.routes"), {
+  prefix: "/api/purchase/requests",
+});
 
 // Department routes — one factory, three registrations
 fastify.register(deptRoutes("HR"),           { prefix: "/api/hr"        });

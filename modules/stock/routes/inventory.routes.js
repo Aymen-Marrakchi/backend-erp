@@ -2,77 +2,35 @@ const { protect, requireRole } = require("../../../hooks/auth.hook");
 const inventoryController = require("../controllers/inventory.controller");
 const {
   idParam,
+  lineIdParam,
   createInventoryBody,
   addLineBody,
-  createAdjustmentBody,
-  updateAdjustmentStatusBody,
+  depotReasonBody,
 } = require("../schemas/inventory.schema");
 
 async function inventoryRoutes(fastify) {
-  const stockAccess = [protect];
-  const adminOnly = [protect, requireRole("ADMIN")];
-  /** ADMIN or STOCK_MANAGER can approve/reject/apply inventory adjustments */
-  const canManageAdjustments = [protect, requireRole("ADMIN", "STOCK_MANAGER")];
+  const canRead   = [protect, requireRole("ADMIN", "STOCK_MANAGER", "DEPOT_MANAGER")];
+  const canCreate = [protect, requireRole("ADMIN", "STOCK_MANAGER")];
+  const canStock  = [protect, requireRole("ADMIN", "STOCK_MANAGER")];
+  const canDepot  = [protect, requireRole("ADMIN", "DEPOT_MANAGER")];
 
-  fastify.get(
-    "/",
-    { preHandler: stockAccess, schema: { tags: ["Inventory"] } },
-    inventoryController.getAllInventories
-  );
+  // Sessions
+  fastify.get("/",    { preHandler: canRead },   inventoryController.getAllInventories);
+  fastify.get("/:id", { preHandler: canRead, schema: { params: idParam } }, inventoryController.getInventoryById);
+  fastify.post("/",   { preHandler: canCreate, schema: { body: createInventoryBody } }, inventoryController.createInventory);
 
-  fastify.get(
-    "/:id",
-    { preHandler: stockAccess, schema: { params: idParam, tags: ["Inventory"] } },
-    inventoryController.getInventoryById
-  );
+  // Lines
+  fastify.get("/:id/lines",  { preHandler: canRead,  schema: { params: idParam } }, inventoryController.getInventoryLines);
+  fastify.post("/:id/lines", { preHandler: canStock, schema: { params: idParam, body: addLineBody } }, inventoryController.addInventoryLine);
 
-  fastify.post(
-    "/",
-    { preHandler: stockAccess, schema: { body: createInventoryBody, tags: ["Inventory"] } },
-    inventoryController.createInventory
-  );
+  // Stock Manager workflow
+  fastify.post("/:id/send-to-depot",         { preHandler: canStock, schema: { params: idParam } }, inventoryController.sendToDepot);
+  fastify.post("/:id/lines/:lineId/approve", { preHandler: canStock, schema: { params: lineIdParam } }, inventoryController.approveInventoryLine);
+  fastify.post("/:id/lines/:lineId/reject",  { preHandler: canStock, schema: { params: lineIdParam } }, inventoryController.rejectInventoryLine);
 
-  fastify.get(
-    "/:id/lines",
-    { preHandler: stockAccess, schema: { params: idParam, tags: ["Inventory"] } },
-    inventoryController.getInventoryLines
-  );
-
-  fastify.post(
-    "/:id/lines",
-    {
-      preHandler: stockAccess,
-      schema: { params: idParam, body: addLineBody, tags: ["Inventory"] }
-    },
-    inventoryController.addInventoryLine
-  );
-
-  fastify.post(
-    "/:id/submit",
-    { preHandler: stockAccess, schema: { params: idParam, tags: ["Inventory"] } },
-    inventoryController.submitInventoryForApproval
-  );
-
-  fastify.get(
-    "/adjustments/all",
-    { preHandler: stockAccess, schema: { tags: ["Inventory"] } },
-    inventoryController.getAllAdjustments
-  );
-
-  fastify.post(
-    "/adjustments",
-    { preHandler: stockAccess, schema: { body: createAdjustmentBody, tags: ["Inventory"] } },
-    inventoryController.createAdjustmentFromLine
-  );
-
-  fastify.patch(
-    "/adjustments/:id/status",
-    {
-      preHandler: canManageAdjustments,
-      schema: { params: idParam, body: updateAdjustmentStatusBody, tags: ["Inventory"] }
-    },
-    inventoryController.updateAdjustmentStatus
-  );
+  // Depot Manager workflow
+  fastify.post("/:id/lines/:lineId/reason",  { preHandler: canDepot, schema: { params: lineIdParam, body: depotReasonBody } }, inventoryController.addDepotReason);
+  fastify.post("/:id/submit-review",         { preHandler: canDepot, schema: { params: idParam } }, inventoryController.submitDepotReview);
 }
 
 module.exports = inventoryRoutes;

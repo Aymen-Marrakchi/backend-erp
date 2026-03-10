@@ -14,15 +14,16 @@ const generateEmail = async (name) => {
 };
 
 const roleMap = {
-  "HR Manager":        "HR_MANAGER",
+  "HR Manager": "HR_MANAGER",
   "Marketing Manager": "MARKETING_MANAGER",
-  "Sales Manager":     "SALES_MANAGER",
-  "Stock Manager":     "STOCK_MANAGER",
-  "Purchase Manager":     "PURCHASE_MANAGER",
-  "Commercial Manager":     "COMMERCIAL_MANAGER",
-  "Finance Manager":     "FINANCE_MANAGER",
-  "Employee":          "EMPLOYEE",
-  "Intern":            "EMPLOYEE",
+  "Sales Manager": "SALES_MANAGER",
+  "Stock Manager": "STOCK_MANAGER",
+  "Depot Manager": "DEPOT_MANAGER",
+  "Purchase Manager": "PURCHASE_MANAGER",
+  "Commercial Manager": "COMMERCIAL_MANAGER",
+  "Finance Manager": "FINANCE_MANAGER",
+  "Employee": "EMPLOYEE",
+  "Intern": "EMPLOYEE",
 };
 
 exports.getAllEmployees = (department) =>
@@ -80,11 +81,27 @@ exports.createEmployee = async (department, data) => {
 };
 
 exports.updateEmployee = async (id, data) => {
+  const existing = await User.findById(id);
+  if (!existing) {
+    throw Object.assign(new Error("Employee not found"), { statusCode: 404 });
+  }
+
   const { name, email, phone, position, salary, joinedDate } = data;
-  const role = roleMap[position] || "EMPLOYEE";
+
+  const resolvedPosition = position ?? existing.position;
+  const resolvedRole = roleMap[resolvedPosition] || existing.role;
+
   return User.findByIdAndUpdate(
     id,
-    { name, email, phone, position, role, salary, joinedDate },
+    {
+      name: name ?? existing.name,
+      email: email ?? existing.email,
+      phone: phone ?? existing.phone,
+      position: resolvedPosition,
+      role: resolvedRole,
+      salary: salary ?? existing.salary,
+      joinedDate: joinedDate ?? existing.joinedDate,
+    },
     { new: true, runValidators: true }
   ).select("-password");
 };
