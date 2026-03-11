@@ -49,9 +49,34 @@ exports.getStockItemByProductId = async (productId) => {
 };
 
 exports.getAllStockItems = async () => {
-  return StockItem.find()
-    .populate("productId")
-    .sort({ updatedAt: -1 });
+  const [items, products] = await Promise.all([
+    StockItem.find().populate("productId").sort({ updatedAt: -1 }),
+    Product.find({ status: "ACTIVE" }),
+  ]);
+
+  // Find products that have no stock item yet and create virtual entries
+  const coveredIds = new Set(items.map((i) => String(i.productId?._id || i.productId)));
+  const missing = products.filter((p) => !coveredIds.has(String(p._id)));
+
+  if (missing.length > 0) {
+    // Persist them so future calls are faster
+    const created = await StockItem.insertMany(
+      missing.map((p) => ({
+        productId: p._id,
+        quantityOnHand: 0,
+        quantityReserved: 0,
+        quantityAvailable: 0,
+        status: "ACTIVE",
+      }))
+    );
+    // Populate productId on new items
+    const newItems = await StockItem.find({
+      _id: { $in: created.map((c) => c._id) },
+    }).populate("productId");
+    return [...items, ...newItems];
+  }
+
+  return items;
 };
 
 exports.ensureEnoughAvailableStock = (stockItem, quantity) => {

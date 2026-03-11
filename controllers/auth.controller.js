@@ -22,7 +22,7 @@ exports.register = async (req, reply) => {
 
 exports.getMe = async (req, reply) => {
   try {
-    const user = await authService.getMe(req.user._id);
+    const user = await authService.getMe(req.user.id);
     return reply.status(200).send(user);
   } catch (err) {
     return reply.status(500).send({ message: err.message });

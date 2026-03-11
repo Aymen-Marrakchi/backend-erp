@@ -23,7 +23,7 @@ exports.createProduct = async (req, reply) => {
   try {
     const data = await productService.createProduct({
       ...req.body,
-      createdBy: req.user?._id || null,
+      createdBy: req.user?.id || null,
     });
     return success(reply, data, 201);
   } catch (err) {
@@ -35,7 +35,7 @@ exports.updateProduct = async (req, reply) => {
   try {
     const data = await productService.updateProduct(req.params.id, {
       ...req.body,
-      updatedBy: req.user?._id || null,
+      updatedBy: req.user?.id || null,
     });
     return success(reply, data);
   } catch (err) {

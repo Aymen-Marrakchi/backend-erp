@@ -13,6 +13,7 @@ const createMovementRecord = async ({
   newReserved,
   lotRef = "",
   lotMode = null,
+  depotId = null,
   sourceModule = "STOCK",
   sourceType = "",
   sourceId = "",
@@ -33,6 +34,7 @@ const createMovementRecord = async ({
     previousReserved,
     newReserved,
     lotRef,
+    depotId: depotId || null,
     sourceModule,
     sourceType,
     sourceId,
@@ -58,6 +60,7 @@ exports.createEntry = async ({
   quantity,
   lotRef = "",
   lotMode = undefined,
+  depotId = null,
   sourceModule = "STOCK",
   sourceType = "MANUAL_ENTRY",
   sourceId = "",
@@ -90,6 +93,7 @@ exports.createEntry = async ({
       newReserved: stockItem.quantityReserved,
       lotRef,
       lotMode,
+      depotId,
       sourceModule,
       sourceType,
       sourceId,
@@ -115,6 +119,7 @@ exports.createExit = async ({
   quantity,
   lotRef = "",
   lotMode = undefined,
+  depotId = null,
   sourceModule = "STOCK",
   sourceType = "MANUAL_EXIT",
   sourceId = "",
@@ -361,10 +366,11 @@ exports.deductReservedStock = async ({
   return movement;
 };
 
-exports.getMovementHistory = async (productId = null) => {
-  const filter = productId ? { productId } : {};
+exports.getMovementHistory = async (productId = null, extraFilter = {}) => {
+  const filter = { ...(productId ? { productId } : {}), ...extraFilter };
   return StockMovement.find(filter)
     .populate("productId")
+    .populate("depotId", "name")
     .populate("createdBy", "name email role")
     .sort({ createdAt: -1 });
 };

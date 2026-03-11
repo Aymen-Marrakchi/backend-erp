@@ -27,7 +27,7 @@ exports.createOrder = async (req, reply) => {
   try {
     const order = await salesOrderService.createOrder({
       ...req.body,
-      createdBy: req.user?._id || null,
+      createdBy: req.user?.id || null,
     });
 
     return reply.code(201).send(order);
@@ -38,7 +38,16 @@ exports.createOrder = async (req, reply) => {
 
 exports.confirmOrder = async (req, reply) => {
   try {
-    const order = await salesOrderService.confirmOrder(req.params.id, req.user?._id || null);
+    const order = await salesOrderService.confirmOrder(req.params.id, req.user?.id || null);
+    return reply.code(200).send(order);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.prepareOrder = async (req, reply) => {
+  try {
+    const order = await salesOrderService.prepareOrder(req.params.id);
     return reply.code(200).send(order);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
@@ -47,7 +56,7 @@ exports.confirmOrder = async (req, reply) => {
 
 exports.cancelOrder = async (req, reply) => {
   try {
-    const order = await salesOrderService.cancelOrder(req.params.id, req.user?._id || null);
+    const order = await salesOrderService.cancelOrder(req.params.id, req.user?.id || null);
     return reply.code(200).send(order);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
@@ -56,7 +65,20 @@ exports.cancelOrder = async (req, reply) => {
 
 exports.shipOrder = async (req, reply) => {
   try {
-    const order = await salesOrderService.shipOrder(req.params.id, req.user?._id || null);
+    const order = await salesOrderService.shipOrder(
+      req.params.id,
+      req.user?.id || null,
+      req.body?.trackingNumber || ""
+    );
+    return reply.code(200).send(order);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.deliverOrder = async (req, reply) => {
+  try {
+    const order = await salesOrderService.deliverOrder(req.params.id);
     return reply.code(200).send(order);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });

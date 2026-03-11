@@ -1,18 +1,5 @@
 const mongoose = require("mongoose");
 
-const reasonEntrySchema = new mongoose.Schema(
-  {
-    reason: { type: String, required: true, trim: true },
-    addedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
-    action: {
-      type: String,
-      enum: ["DEPOT_REASON", "APPROVED", "REJECTED"],
-      required: true,
-    },
-  },
-  { timestamps: true, _id: false }
-);
-
 const inventoryCountLineSchema = new mongoose.Schema(
   {
     inventoryCountId: {
@@ -28,27 +15,21 @@ const inventoryCountLineSchema = new mongoose.Schema(
       index: true,
     },
     systemQuantity: { type: Number, required: true, min: 0 },
-    countedQuantity: { type: Number, required: true, min: 0 },
-    varianceQuantity: { type: Number, required: true, default: 0 },
+
+    // Filled by Depot Manager when they do the physical count
+    countedQuantity: { type: Number, default: 0, min: 0 },
+    varianceQuantity: { type: Number, default: 0 },
+
     lotRef: { type: String, default: "", trim: true },
     notes: { type: String, default: "", trim: true },
 
-    // Workflow status
-    // PENDING:  waiting for depot manager to review
-    // REVIEWED: depot manager gave a reason
-    // APPROVED: stock manager approved → stock adjusted
-    // REJECTED: stock manager rejected → depot must re-reason
+    // PENDING: waiting for depot manager to enter physical count
+    // COUNTED: depot manager entered the quantity
     status: {
       type: String,
-      enum: ["PENDING", "REVIEWED", "APPROVED", "REJECTED"],
+      enum: ["PENDING", "COUNTED"],
       default: "PENDING",
     },
-
-    // Latest reason from depot manager
-    depotReason: { type: String, default: "", trim: true },
-
-    // Full audit trail of reasons + decisions
-    reasonHistory: { type: [reasonEntrySchema], default: [] },
 
     countedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     countedAt: { type: Date, default: null },
@@ -59,7 +40,9 @@ const inventoryCountLineSchema = new mongoose.Schema(
 );
 
 inventoryCountLineSchema.pre("validate", function () {
-  this.varianceQuantity = this.countedQuantity - this.systemQuantity;
+  if (this.countedQuantity != null) {
+    this.varianceQuantity = this.countedQuantity - this.systemQuantity;
+  }
 });
 
 module.exports = mongoose.model("InventoryCountLine", inventoryCountLineSchema);

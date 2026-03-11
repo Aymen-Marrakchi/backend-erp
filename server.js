@@ -81,6 +81,9 @@ fastify.register(require("./modules/stock/routes/depot.routes"), {
 fastify.register(require("./modules/commercial/routes/sales-order.routes"), {
   prefix: "/api/commercial/orders",
 });
+fastify.register(require("./modules/commercial/routes/backorder.routes"), {
+  prefix: "/api/commercial/backorders",
+});
 fastify.register(require("./modules/stock/routes/sku-setting.routes"), {
   prefix: "/api/stock/settings/sku",
 });

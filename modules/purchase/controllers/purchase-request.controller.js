@@ -27,7 +27,7 @@ exports.createPurchaseRequest = async (req, reply) => {
   try {
     const data = await purchaseRequestService.createPurchaseRequest({
       ...req.body,
-      createdBy: req.user?._id || null,
+      createdBy: req.user?.id || null,
     });
 
     return reply.code(201).send(data);
@@ -41,7 +41,7 @@ exports.createPurchaseRequestFromAlert = async (req, reply) => {
     const data = await purchaseRequestService.createFromAlert({
       alertId: req.params.id,
       ...req.body,
-      createdBy: req.user?._id || null,
+      createdBy: req.user?.id || null,
     });
 
     return reply.code(201).send(data);
@@ -55,7 +55,7 @@ exports.updatePurchaseRequestStatus = async (req, reply) => {
     const data = await purchaseRequestService.updatePurchaseRequestStatus(
       req.params.id,
       req.body,
-      req.user?._id || null
+      req.user?.id || null
     );
 
     return reply.code(200).send(data);

@@ -23,6 +23,7 @@ const createSalesOrderBody = {
     orderNo: { type: "string", minLength: 2 },
     customerName: { type: "string", minLength: 2 },
     notes: { type: "string" },
+    promisedDate: { type: "string", format: "date-time" },
     lines: {
       type: "array",
       minItems: 1,
@@ -31,7 +32,15 @@ const createSalesOrderBody = {
   },
 };
 
+const shipOrderBody = {
+  type: "object",
+  properties: {
+    trackingNumber: { type: "string", minLength: 1 },
+  },
+};
+
 module.exports = {
   idParam,
   createSalesOrderBody,
+  shipOrderBody,
 };

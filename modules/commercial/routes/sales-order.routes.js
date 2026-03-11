@@ -1,6 +1,6 @@
 const { protect, requireRole } = require("../../../hooks/auth.hook");
 const salesOrderController = require("../controllers/sales-order.controller");
-const { idParam, createSalesOrderBody } = require("../schemas/sales-order.schema");
+const { idParam, createSalesOrderBody, shipOrderBody } = require("../schemas/sales-order.schema");
 
 async function salesOrderRoutes(fastify) {
   const commercialAccess = [
@@ -33,6 +33,12 @@ async function salesOrderRoutes(fastify) {
   );
 
   fastify.post(
+    "/:id/prepare",
+    { preHandler: commercialAccess, schema: { params: idParam } },
+    salesOrderController.prepareOrder
+  );
+
+  fastify.post(
     "/:id/cancel",
     { preHandler: commercialAccess, schema: { params: idParam } },
     salesOrderController.cancelOrder
@@ -40,8 +46,17 @@ async function salesOrderRoutes(fastify) {
 
   fastify.post(
     "/:id/ship",
-    { preHandler: commercialAccess, schema: { params: idParam } },
+    {
+      preHandler: commercialAccess,
+      schema: { params: idParam, body: shipOrderBody },
+    },
     salesOrderController.shipOrder
+  );
+
+  fastify.post(
+    "/:id/deliver",
+    { preHandler: commercialAccess, schema: { params: idParam } },
+    salesOrderController.deliverOrder
   );
 }
 

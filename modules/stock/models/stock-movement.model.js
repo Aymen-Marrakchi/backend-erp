@@ -66,6 +66,12 @@ const stockMovementSchema = new mongoose.Schema(
       default: null,
     },
 
+    depotId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Depot",
+      default: null,
+    },
+
     sourceModule: {
       type: String,
       enum: ["STOCK", "COMMERCIAL", "ACHAT", "PRODUCTION", "FINANCE"],

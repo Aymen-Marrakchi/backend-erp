@@ -37,7 +37,7 @@ const salesOrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["DRAFT", "CONFIRMED", "CANCELLED", "SHIPPED"],
+      enum: ["DRAFT", "CONFIRMED", "PREPARED", "SHIPPED", "DELIVERED", "CANCELLED"],
       default: "DRAFT",
     },
     lines: {
@@ -52,6 +52,11 @@ const salesOrderSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    promisedDate: { type: Date, default: null },
+    preparedAt: { type: Date, default: null },
+    shippedAt: { type: Date, default: null },
+    deliveredAt: { type: Date, default: null },
+    trackingNumber: { type: String, default: "" },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

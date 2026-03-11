@@ -1,4 +1,5 @@
 const Product = require("../models/product.model");
+const StockItem = require("../models/stock-item.model");
 
 exports.getAllProducts = async () => {
   return Product.find().sort({ createdAt: -1 });
@@ -28,7 +29,7 @@ exports.createProduct = async ({
     throw Object.assign(new Error("SKU already exists"), { statusCode: 400 });
   }
 
-  return Product.create({
+  const product = await Product.create({
     sku: code,
     name,
     type,
@@ -39,6 +40,17 @@ exports.createProduct = async ({
     createdBy,
     updatedBy: createdBy,
   });
+
+  // Auto-create a zero-quantity stock item so it appears immediately in stock items list
+  await StockItem.create({
+    productId: product._id,
+    quantityOnHand: 0,
+    quantityReserved: 0,
+    quantityAvailable: 0,
+    status: "ACTIVE",
+  });
+
+  return product;
 };
 
 exports.updateProduct = async (

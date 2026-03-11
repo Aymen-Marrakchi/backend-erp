@@ -25,7 +25,7 @@ exports.createSkuSetting = async (req, reply) => {
   try {
     const data = await skuSettingService.createSkuSetting({
       ...req.body,
-      createdBy: req.user?._id || null,
+      createdBy: req.user?.id || null,
     });
     return reply.code(201).send(data);
   } catch (err) {

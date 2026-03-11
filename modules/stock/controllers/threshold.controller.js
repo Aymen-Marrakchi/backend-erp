@@ -32,7 +32,7 @@ exports.createRule = async (req, reply) => {
   try {
     const data = await thresholdService.createRule({
       ...req.body,
-      createdBy: req.user?._id || null,
+      createdBy: req.user?.id || null,
     });
     return success(reply, data, 201);
   } catch (err) {
@@ -44,7 +44,7 @@ exports.updateRule = async (req, reply) => {
   try {
     const data = await thresholdService.updateRule(req.params.id, {
       ...req.body,
-      updatedBy: req.user?._id || null,
+      updatedBy: req.user?.id || null,
     });
     return success(reply, data);
   } catch (err) {
