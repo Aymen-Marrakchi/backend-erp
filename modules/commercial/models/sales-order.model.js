@@ -57,6 +57,23 @@ const salesOrderSchema = new mongoose.Schema(
     shippedAt: { type: Date, default: null },
     deliveredAt: { type: Date, default: null },
     trackingNumber: { type: String, default: "" },
+    carrierId: { type: mongoose.Schema.Types.ObjectId, ref: "Carrier", default: null },
+    shippingCost: { type: Number, default: 0, min: 0 },
+    isUrgent: { type: Boolean, default: false },
+    shipApproval: {
+      status: {
+        type: String,
+        enum: ["NONE", "PENDING", "APPROVED", "REJECTED"],
+        default: "NONE",
+      },
+      requestedAt: { type: Date, default: null },
+      requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      approvedAt: { type: Date, default: null },
+      approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      rejectedAt: { type: Date, default: null },
+      rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      rejectionReason: { type: String, default: "" },
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

@@ -84,6 +84,12 @@ fastify.register(require("./modules/commercial/routes/sales-order.routes"), {
 fastify.register(require("./modules/commercial/routes/backorder.routes"), {
   prefix: "/api/commercial/backorders",
 });
+fastify.register(require("./modules/commercial/routes/carrier.routes"), {
+  prefix: "/api/commercial/carriers",
+});
+fastify.register(require("./modules/commercial/routes/delivery-plan.routes"), {
+  prefix: "/api/commercial/delivery-plans",
+});
 fastify.register(require("./modules/stock/routes/sku-setting.routes"), {
   prefix: "/api/stock/settings/sku",
 });

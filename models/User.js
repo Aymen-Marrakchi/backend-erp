@@ -18,6 +18,7 @@ const userSchema = new mongoose.Schema(
       "COMMERCIAL_MANAGER",
       "FINANCE_MANAGER",
       "PURCHASE_MANAGER",
+      "WAREHOUSE_OPERATOR",
       "EMPLOYEE",
     ],
       default: "EMPLOYEE",

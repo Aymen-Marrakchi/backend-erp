@@ -1,0 +1,39 @@
+const mongoose = require("mongoose");
+
+const deliveryPlanSchema = new mongoose.Schema(
+  {
+    planNo: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+      uppercase: true,
+    },
+    planDate: { type: Date, required: true },
+    carrierId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Carrier",
+      default: null,
+    },
+    zone: { type: String, default: "", trim: true },
+    driver: { type: String, default: "", trim: true },
+    orderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "SalesOrder" }],
+    status: {
+      type: String,
+      enum: ["PLANNED", "IN_PROGRESS", "COMPLETED", "CANCELLED"],
+      default: "PLANNED",
+    },
+    notes: { type: String, default: "", trim: true },
+    startedAt: { type: Date, default: null },
+    completedAt: { type: Date, default: null },
+    cancelledAt: { type: Date, default: null },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+  },
+  { timestamps: true }
+);
+
+module.exports = mongoose.model("DeliveryPlan", deliveryPlanSchema);

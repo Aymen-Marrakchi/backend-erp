@@ -35,7 +35,24 @@ const createSalesOrderBody = {
 const shipOrderBody = {
   type: "object",
   properties: {
-    trackingNumber: { type: "string", minLength: 1 },
+    trackingNumber: { type: "string" },
+    carrierId: { type: "string", minLength: 24, maxLength: 24 },
+    shippingCost: { type: "number", minimum: 0 },
+  },
+};
+
+const markUrgentBody = {
+  type: "object",
+  properties: {
+    urgent: { type: "boolean" },
+  },
+};
+
+const rejectShipBody = {
+  type: "object",
+  required: ["reason"],
+  properties: {
+    reason: { type: "string", minLength: 1 },
   },
 };
 
@@ -43,4 +60,6 @@ module.exports = {
   idParam,
   createSalesOrderBody,
   shipOrderBody,
+  markUrgentBody,
+  rejectShipBody,
 };

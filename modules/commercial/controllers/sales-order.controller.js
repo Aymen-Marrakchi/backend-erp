@@ -68,7 +68,9 @@ exports.shipOrder = async (req, reply) => {
     const order = await salesOrderService.shipOrder(
       req.params.id,
       req.user?.id || null,
-      req.body?.trackingNumber || ""
+      req.body?.trackingNumber || "",
+      req.body?.carrierId || null,
+      req.body?.shippingCost || 0
     );
     return reply.code(200).send(order);
   } catch (err) {
@@ -79,6 +81,47 @@ exports.shipOrder = async (req, reply) => {
 exports.deliverOrder = async (req, reply) => {
   try {
     const order = await salesOrderService.deliverOrder(req.params.id);
+    return reply.code(200).send(order);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.markUrgent = async (req, reply) => {
+  try {
+    const urgent = req.body?.urgent !== false;
+    const order = await salesOrderService.markUrgent(req.params.id, urgent);
+    return reply.code(200).send(order);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.requestShipApproval = async (req, reply) => {
+  try {
+    const order = await salesOrderService.requestShipApproval(req.params.id, req.user?.id || null);
+    return reply.code(200).send(order);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.approveShip = async (req, reply) => {
+  try {
+    const order = await salesOrderService.approveShip(req.params.id, req.user?.id || null);
+    return reply.code(200).send(order);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.rejectShip = async (req, reply) => {
+  try {
+    const order = await salesOrderService.rejectShip(
+      req.params.id,
+      req.user?.id || null,
+      req.body?.reason || ""
+    );
     return reply.code(200).send(order);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });

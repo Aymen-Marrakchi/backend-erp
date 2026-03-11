@@ -6,7 +6,8 @@ const backOrderService = require("./backorder.service");
 const populateOrder = (query) =>
   query
     .populate("lines.productId")
-    .populate("createdBy", "name email role");
+    .populate("createdBy", "name email role")
+    .populate("carrierId");
 
 exports.getAllOrders = async () => {
   return populateOrder(SalesOrder.find()).sort({ createdAt: -1 });
@@ -165,7 +166,105 @@ exports.cancelOrder = async (id, userId = null) => {
   return exports.getOrderById(order._id);
 };
 
-exports.shipOrder = async (id, userId = null, trackingNumber = "") => {
+exports.markUrgent = async (id, urgent = true) => {
+  const order = await SalesOrder.findById(id);
+  if (!order) {
+    throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
+  }
+
+  if (["SHIPPED", "DELIVERED", "CANCELLED"].includes(order.status)) {
+    throw Object.assign(new Error("Cannot change urgency of a shipped, delivered or cancelled order"), { statusCode: 400 });
+  }
+
+  order.isUrgent = urgent;
+  if (!urgent) {
+    order.shipApproval = {
+      status: "NONE",
+      requestedAt: null,
+      requestedBy: null,
+      approvedAt: null,
+      approvedBy: null,
+      rejectedAt: null,
+      rejectedBy: null,
+      rejectionReason: "",
+    };
+  }
+  await order.save();
+  return exports.getOrderById(order._id);
+};
+
+exports.requestShipApproval = async (id, userId = null) => {
+  const order = await SalesOrder.findById(id);
+  if (!order) {
+    throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
+  }
+
+  if (order.status !== "PREPARED") {
+    throw Object.assign(new Error("Only prepared orders can request ship approval"), { statusCode: 400 });
+  }
+
+  if (!order.isUrgent) {
+    throw Object.assign(new Error("Order is not flagged as urgent"), { statusCode: 400 });
+  }
+
+  if (order.shipApproval?.status === "PENDING") {
+    throw Object.assign(new Error("Approval already pending"), { statusCode: 400 });
+  }
+
+  order.shipApproval = {
+    status: "PENDING",
+    requestedAt: new Date(),
+    requestedBy: userId,
+    approvedAt: null,
+    approvedBy: null,
+    rejectedAt: null,
+    rejectedBy: null,
+    rejectionReason: "",
+  };
+  await order.save();
+  return exports.getOrderById(order._id);
+};
+
+exports.approveShip = async (id, userId = null) => {
+  const order = await SalesOrder.findById(id);
+  if (!order) {
+    throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
+  }
+
+  if (order.shipApproval?.status !== "PENDING") {
+    throw Object.assign(new Error("No pending approval request for this order"), { statusCode: 400 });
+  }
+
+  order.shipApproval.status = "APPROVED";
+  order.shipApproval.approvedAt = new Date();
+  order.shipApproval.approvedBy = userId;
+  await order.save();
+  return exports.getOrderById(order._id);
+};
+
+exports.rejectShip = async (id, userId = null, reason = "") => {
+  const order = await SalesOrder.findById(id);
+  if (!order) {
+    throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
+  }
+
+  if (order.shipApproval?.status !== "PENDING") {
+    throw Object.assign(new Error("No pending approval request for this order"), { statusCode: 400 });
+  }
+
+  if (!reason || !reason.trim()) {
+    throw Object.assign(new Error("A rejection reason is required"), { statusCode: 400 });
+  }
+
+  order.shipApproval.status = "REJECTED";
+  order.shipApproval.rejectedAt = new Date();
+  order.shipApproval.rejectedBy = userId;
+  order.shipApproval.rejectionReason = reason.trim();
+  await order.save();
+  return exports.getOrderById(order._id);
+};
+
+exports.shipOrder = async (id, userId = null, trackingNumber = "", carrierId = null, shippingCost = 0) => {
   const order = await SalesOrder.findById(id);
   if (!order) {
     throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
@@ -173,6 +272,14 @@ exports.shipOrder = async (id, userId = null, trackingNumber = "") => {
 
   if (order.status !== "PREPARED") {
     throw Object.assign(new Error("Only prepared orders can be shipped"), { statusCode: 400 });
+  }
+
+  // Urgent orders require prior approval
+  if (order.isUrgent && order.shipApproval?.status !== "APPROVED") {
+    throw Object.assign(
+      new Error("Urgent orders require shipment approval before shipping"),
+      { statusCode: 403 }
+    );
   }
 
   for (const line of order.lines) {
@@ -191,9 +298,9 @@ exports.shipOrder = async (id, userId = null, trackingNumber = "") => {
 
   order.status = "SHIPPED";
   order.shippedAt = new Date();
-  if (trackingNumber) {
-    order.trackingNumber = trackingNumber.trim();
-  }
+  if (trackingNumber) order.trackingNumber = trackingNumber.trim();
+  if (carrierId) order.carrierId = carrierId;
+  order.shippingCost = shippingCost || 0;
   await order.save();
 
   return exports.getOrderById(order._id);

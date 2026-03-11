@@ -1,62 +1,85 @@
 const { protect, requireRole } = require("../../../hooks/auth.hook");
 const salesOrderController = require("../controllers/sales-order.controller");
-const { idParam, createSalesOrderBody, shipOrderBody } = require("../schemas/sales-order.schema");
+const { idParam, createSalesOrderBody, shipOrderBody, markUrgentBody, rejectShipBody } = require("../schemas/sales-order.schema");
 
 async function salesOrderRoutes(fastify) {
-  const commercialAccess = [
-    protect,
-    requireRole("ADMIN", "COMMERCIAL_MANAGER"),
-  ];
+  // Full commercial access (managers only)
+  const managerAccess = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER")];
 
-  fastify.get(
-    "/",
-    { preHandler: commercialAccess },
-    salesOrderController.getAllOrders
-  );
+  // Warehouse operators can also read + prepare + ship
+  const operatorAccess = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER", "WAREHOUSE_OPERATOR")];
+
+  fastify.get("/", { preHandler: operatorAccess }, salesOrderController.getAllOrders);
 
   fastify.get(
     "/:id",
-    { preHandler: commercialAccess, schema: { params: idParam } },
+    { preHandler: operatorAccess, schema: { params: idParam } },
     salesOrderController.getOrderById
   );
 
+  // Creation, confirmation, cancellation, delivery: managers only
   fastify.post(
     "/",
-    { preHandler: commercialAccess, schema: { body: createSalesOrderBody } },
+    { preHandler: managerAccess, schema: { body: createSalesOrderBody } },
     salesOrderController.createOrder
   );
 
   fastify.post(
     "/:id/confirm",
-    { preHandler: commercialAccess, schema: { params: idParam } },
+    { preHandler: managerAccess, schema: { params: idParam } },
     salesOrderController.confirmOrder
   );
 
   fastify.post(
-    "/:id/prepare",
-    { preHandler: commercialAccess, schema: { params: idParam } },
-    salesOrderController.prepareOrder
-  );
-
-  fastify.post(
     "/:id/cancel",
-    { preHandler: commercialAccess, schema: { params: idParam } },
+    { preHandler: managerAccess, schema: { params: idParam } },
     salesOrderController.cancelOrder
   );
 
   fastify.post(
-    "/:id/ship",
-    {
-      preHandler: commercialAccess,
-      schema: { params: idParam, body: shipOrderBody },
-    },
-    salesOrderController.shipOrder
+    "/:id/deliver",
+    { preHandler: managerAccess, schema: { params: idParam } },
+    salesOrderController.deliverOrder
+  );
+
+  // Prepare + ship: warehouse operators allowed
+  fastify.post(
+    "/:id/prepare",
+    { preHandler: operatorAccess, schema: { params: idParam } },
+    salesOrderController.prepareOrder
   );
 
   fastify.post(
-    "/:id/deliver",
-    { preHandler: commercialAccess, schema: { params: idParam } },
-    salesOrderController.deliverOrder
+    "/:id/ship",
+    { preHandler: operatorAccess, schema: { params: idParam, body: shipOrderBody } },
+    salesOrderController.shipOrder
+  );
+
+  // Urgency: managers only
+  fastify.post(
+    "/:id/mark-urgent",
+    { preHandler: managerAccess, schema: { params: idParam, body: markUrgentBody } },
+    salesOrderController.markUrgent
+  );
+
+  // Approval requests: operators (and managers)
+  fastify.post(
+    "/:id/request-approval",
+    { preHandler: operatorAccess, schema: { params: idParam } },
+    salesOrderController.requestShipApproval
+  );
+
+  // Approve/reject: managers only
+  fastify.post(
+    "/:id/approve-ship",
+    { preHandler: managerAccess, schema: { params: idParam } },
+    salesOrderController.approveShip
+  );
+
+  fastify.post(
+    "/:id/reject-ship",
+    { preHandler: managerAccess, schema: { params: idParam, body: rejectShipBody } },
+    salesOrderController.rejectShip
   );
 }
 
