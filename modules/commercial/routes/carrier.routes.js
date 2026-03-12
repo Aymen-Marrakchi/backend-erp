@@ -24,14 +24,15 @@ const carrierBody = {
 };
 
 async function carrierRoutes(fastify) {
-  const access = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER")];
+  const managerAccess = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER")];
+  const readAccess = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER", "WAREHOUSE_OPERATOR")];
 
-  fastify.get("/", { preHandler: access }, carrierController.getAll);
-  fastify.get("/active", { preHandler: access }, carrierController.getActive);
-  fastify.get("/:id", { preHandler: access, schema: { params: idParam } }, carrierController.getById);
-  fastify.post("/", { preHandler: access, schema: { body: carrierBody } }, carrierController.create);
-  fastify.put("/:id", { preHandler: access, schema: { params: idParam } }, carrierController.update);
-  fastify.post("/:id/toggle", { preHandler: access, schema: { params: idParam } }, carrierController.toggleActive);
+  fastify.get("/", { preHandler: readAccess }, carrierController.getAll);
+  fastify.get("/active", { preHandler: readAccess }, carrierController.getActive);
+  fastify.get("/:id", { preHandler: readAccess, schema: { params: idParam } }, carrierController.getById);
+  fastify.post("/", { preHandler: managerAccess, schema: { body: carrierBody } }, carrierController.create);
+  fastify.put("/:id", { preHandler: managerAccess, schema: { params: idParam } }, carrierController.update);
+  fastify.post("/:id/toggle", { preHandler: managerAccess, schema: { params: idParam } }, carrierController.toggleActive);
 }
 
 module.exports = carrierRoutes;

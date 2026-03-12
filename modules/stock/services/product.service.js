@@ -55,7 +55,7 @@ exports.createProduct = async ({
 
 exports.updateProduct = async (
   id,
-  { sku, name, type, unit, isLotTracked, status, purchasePrice, updatedBy = null }
+  { sku, name, type, unit, isLotTracked, status, purchasePrice, salePrice, updatedBy = null }
 ) => {
   const product = await Product.findById(id);
   if (!product) {
@@ -80,6 +80,7 @@ exports.updateProduct = async (
   if (isLotTracked !== undefined) product.isLotTracked = isLotTracked;
   if (status !== undefined) product.status = status;
   if (purchasePrice !== undefined) product.purchasePrice = purchasePrice;
+  if (salePrice !== undefined) product.salePrice = salePrice;
   product.updatedBy = updatedBy;
 
   await product.save();

@@ -84,8 +84,14 @@ fastify.register(require("./modules/commercial/routes/sales-order.routes"), {
 fastify.register(require("./modules/commercial/routes/backorder.routes"), {
   prefix: "/api/commercial/backorders",
 });
+fastify.register(require("./modules/commercial/routes/customer.routes"), {
+  prefix: "/api/commercial/customers",
+});
 fastify.register(require("./modules/commercial/routes/carrier.routes"), {
   prefix: "/api/commercial/carriers",
+});
+fastify.register(require("./modules/commercial/routes/vehicle.routes"), {
+  prefix: "/api/commercial/vehicles",
 });
 fastify.register(require("./modules/commercial/routes/delivery-plan.routes"), {
   prefix: "/api/commercial/delivery-plans",
@@ -95,6 +101,12 @@ fastify.register(require("./modules/stock/routes/sku-setting.routes"), {
 });
 fastify.register(require("./modules/purchase/routes/purchase-request.routes"), {
   prefix: "/api/purchase/requests",
+});
+fastify.register(require("./modules/production/routes/work-center.routes"), {
+  prefix: "/api/production/work-centers",
+});
+fastify.register(require("./modules/production/routes/production-order.routes"), {
+  prefix: "/api/production/orders",
 });
 
 // Department routes — one factory, three registrations

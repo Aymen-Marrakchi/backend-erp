@@ -1,9 +1,34 @@
 const DeliveryPlan = require("../models/delivery-plan.model");
 const SalesOrder = require("../models/sales-order.model");
 
+async function generatePlanNo(planDate) {
+  const date = new Date(planDate);
+  if (Number.isNaN(date.getTime())) {
+    throw Object.assign(new Error("Invalid plan date"), { statusCode: 400 });
+  }
+
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const year = String(date.getUTCFullYear());
+  const planSuffix = `${month}/${year}`;
+  const regex = new RegExp(`^PLAN-(\\d+)-${month}\\/${year}$`, "i");
+
+  const plans = await DeliveryPlan.find({
+    planNo: { $regex: regex },
+  }).select("planNo");
+
+  const maxSequence = plans.reduce((max, plan) => {
+    const match = String(plan.planNo || "").match(regex);
+    const sequence = match ? Number(match[1]) : 0;
+    return Math.max(max, sequence);
+  }, 0);
+
+  return `PLAN-${maxSequence + 1}-${planSuffix}`;
+}
+
 const populatePlan = (query) =>
   query
     .populate("carrierId")
+    .populate("vehicleId", "matricule capacityKg capacityPackets")
     .populate({
       path: "orderIds",
       populate: { path: "lines.productId", select: "name sku" },
@@ -35,30 +60,24 @@ exports.getUnassignedShippedOrders = async () => {
 };
 
 exports.create = async ({
-  planNo,
   planDate,
   carrierId = null,
+  vehicleId = null,
   zone = "",
-  driver = "",
+  startDate = null,
   orderIds = [],
   notes = "",
   createdBy = null,
 }) => {
-  const exists = await DeliveryPlan.findOne({
-    planNo: planNo.trim().toUpperCase(),
-  });
-  if (exists) {
-    throw Object.assign(new Error("Plan number already exists"), {
-      statusCode: 400,
-    });
-  }
+  const planNo = await generatePlanNo(planDate);
 
   const plan = await DeliveryPlan.create({
     planNo,
     planDate,
     carrierId,
+    vehicleId,
     zone,
-    driver,
+    startDate,
     orderIds,
     notes,
     createdBy,

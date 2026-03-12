@@ -11,13 +11,13 @@ const idParam = {
 
 const createBody = {
   type: "object",
-  required: ["planNo", "planDate"],
+  required: ["planDate"],
   properties: {
-    planNo: { type: "string", minLength: 1 },
     planDate: { type: "string" },
     carrierId: { type: "string", minLength: 24, maxLength: 24 },
+    vehicleId: { type: "string", minLength: 24, maxLength: 24 },
     zone: { type: "string" },
-    driver: { type: "string" },
+    startDate: { type: "string" },
     orderIds: { type: "array", items: { type: "string" } },
     notes: { type: "string" },
   },

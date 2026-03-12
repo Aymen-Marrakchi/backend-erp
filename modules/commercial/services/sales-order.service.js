@@ -1,4 +1,5 @@
 const SalesOrder = require("../models/sales-order.model");
+const Customer = require("../models/customer.model");
 const stockMovementService = require("../../stock/services/stock-movement.service");
 const stockService = require("../../stock/services/stock.service");
 const backOrderService = require("./backorder.service");
@@ -7,7 +8,8 @@ const populateOrder = (query) =>
   query
     .populate("lines.productId")
     .populate("createdBy", "name email role")
-    .populate("carrierId");
+    .populate("carrierId")
+    .populate("customerId", "name email phone company");
 
 exports.getAllOrders = async () => {
   return populateOrder(SalesOrder.find()).sort({ createdAt: -1 });
@@ -19,20 +21,35 @@ exports.getOrderById = async (id) => {
 
 exports.createOrder = async ({
   orderNo,
+  customerId = null,
   customerName,
   lines,
   notes = "",
   promisedDate = null,
   createdBy = null,
 }) => {
-  const exists = await SalesOrder.findOne({ orderNo: orderNo.trim().toUpperCase() });
+  // Enforce ORD- prefix
+  const rawNo = String(orderNo).trim().toUpperCase().replace(/^ORD-/, "");
+  const finalOrderNo = `ORD-${rawNo}`;
+
+  const exists = await SalesOrder.findOne({ orderNo: finalOrderNo });
   if (exists) {
     throw Object.assign(new Error("Order number already exists"), { statusCode: 400 });
   }
 
+  // Auto-fill customerName from Customer document if customerId provided
+  let resolvedName = customerName || "";
+  if (customerId) {
+    const customer = await Customer.findById(customerId);
+    if (!customer) throw Object.assign(new Error("Customer not found"), { statusCode: 404 });
+    resolvedName = customer.name;
+  }
+  if (!resolvedName) throw Object.assign(new Error("Customer is required"), { statusCode: 400 });
+
   const order = await SalesOrder.create({
-    orderNo: orderNo.trim().toUpperCase(),
-    customerName,
+    orderNo: finalOrderNo,
+    customerId: customerId || null,
+    customerName: resolvedName,
     lines,
     notes,
     promisedDate,

@@ -17,6 +17,12 @@ const salesOrderLineSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    discount: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
   },
   { _id: false }
 );
@@ -29,6 +35,11 @@ const salesOrderSchema = new mongoose.Schema(
       unique: true,
       trim: true,
       uppercase: true,
+    },
+    customerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
+      default: null,
     },
     customerName: {
       type: String,

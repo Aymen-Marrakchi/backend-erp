@@ -43,6 +43,18 @@ async function productRoutes(fastify) {
     { preHandler:  stockManagers, schema: { params: idParam, tags: ["Products"] } },
     productController.deleteProduct
   );
+
+  fastify.patch(
+    "/:id/sale-price",
+    {
+      preHandler: [protect, requireRole("ADMIN", "STOCK_MANAGER", "COMMERCIAL_MANAGER")],
+      schema: {
+        params: idParam,
+        body: { type: "object", required: ["salePrice"], properties: { salePrice: { type: "number", minimum: 0 } } },
+      },
+    },
+    productController.updateSalePrice
+  );
 }
 
 module.exports = productRoutes;

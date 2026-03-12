@@ -13,15 +13,17 @@ const salesOrderLine = {
     productId: { type: "string", minLength: 24, maxLength: 24 },
     quantity: { type: "number", minimum: 1 },
     unitPrice: { type: "number", minimum: 0 },
+    discount: { type: "number", minimum: 0, maximum: 100 },
   },
 };
 
 const createSalesOrderBody = {
   type: "object",
-  required: ["orderNo", "customerName", "lines"],
+  required: ["orderNo", "lines"],
   properties: {
-    orderNo: { type: "string", minLength: 2 },
-    customerName: { type: "string", minLength: 2 },
+    orderNo: { type: "string", minLength: 1 },
+    customerId: { type: "string", minLength: 24, maxLength: 24 },
+    customerName: { type: "string" },
     notes: { type: "string" },
     promisedDate: { type: "string", format: "date-time" },
     lines: {

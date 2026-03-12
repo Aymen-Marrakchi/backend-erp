@@ -15,8 +15,13 @@ const deliveryPlanSchema = new mongoose.Schema(
       ref: "Carrier",
       default: null,
     },
+    vehicleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Vehicle",
+      default: null,
+    },
     zone: { type: String, default: "", trim: true },
-    driver: { type: String, default: "", trim: true },
+    startDate: { type: Date, default: null },
     orderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "SalesOrder" }],
     status: {
       type: String,

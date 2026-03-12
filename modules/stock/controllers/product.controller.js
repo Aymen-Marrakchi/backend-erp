@@ -51,3 +51,12 @@ exports.deleteProduct = async (req, reply) => {
     return error(reply, err.message, err.statusCode || 500);
   }
 };
+
+exports.updateSalePrice = async (req, reply) => {
+  try {
+    const data = await productService.updateProduct(req.params.id, { salePrice: req.body.salePrice });
+    return success(reply, data);
+  } catch (err) {
+    return error(reply, err.message, err.statusCode || 500);
+  }
+};

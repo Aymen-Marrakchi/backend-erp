@@ -21,6 +21,7 @@ const roleMap = {
   "Depot Manager": "DEPOT_MANAGER",
   "Purchase Manager": "PURCHASE_MANAGER",
   "Commercial Manager": "COMMERCIAL_MANAGER",
+  "Warehouse Operator": "WAREHOUSE_OPERATOR",
   "Finance Manager": "FINANCE_MANAGER",
   "Employee": "EMPLOYEE",
   "Intern": "EMPLOYEE",
