@@ -48,7 +48,7 @@ const salesOrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["DRAFT", "CONFIRMED", "PREPARED", "SHIPPED", "DELIVERED", "CANCELLED"],
+      enum: ["DRAFT", "CONFIRMED", "PREPARED", "SHIPPED", "DELIVERED", "CLOSED", "CANCELLED"],
       default: "DRAFT",
     },
     lines: {
@@ -67,9 +67,12 @@ const salesOrderSchema = new mongoose.Schema(
     preparedAt: { type: Date, default: null },
     shippedAt: { type: Date, default: null },
     deliveredAt: { type: Date, default: null },
+    closedAt: { type: Date, default: null },
     trackingNumber: { type: String, default: "" },
     carrierId: { type: mongoose.Schema.Types.ObjectId, ref: "Carrier", default: null },
+    vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle", default: null },
     shippingCost: { type: Number, default: 0, min: 0 },
+    shipmentAddress: { type: String, default: "", trim: true },
     isUrgent: { type: Boolean, default: false },
     shipApproval: {
       status: {
@@ -81,6 +84,7 @@ const salesOrderSchema = new mongoose.Schema(
       requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
       approvedAt: { type: Date, default: null },
       approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      approverNotes: { type: String, default: "" },
       rejectedAt: { type: Date, default: null },
       rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
       rejectionReason: { type: String, default: "" },

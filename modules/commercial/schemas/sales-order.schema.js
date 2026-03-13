@@ -25,7 +25,7 @@ const createSalesOrderBody = {
     customerId: { type: "string", minLength: 24, maxLength: 24 },
     customerName: { type: "string" },
     notes: { type: "string" },
-    promisedDate: { type: "string", format: "date-time" },
+    promisedDate: { type: "string" },
     lines: {
       type: "array",
       minItems: 1,
@@ -39,7 +39,9 @@ const shipOrderBody = {
   properties: {
     trackingNumber: { type: "string" },
     carrierId: { type: "string", minLength: 24, maxLength: 24 },
+    vehicleId: { type: "string", minLength: 24, maxLength: 24 },
     shippingCost: { type: "number", minimum: 0 },
+    shipmentAddress: { type: "string" },
   },
 };
 

@@ -7,7 +7,6 @@ const carrierSchema = new mongoose.Schema(
     contactEmail: { type: String, default: "", trim: true },
     contactPhone: { type: String, default: "", trim: true },
     baseRateFlat: { type: Number, default: 0, min: 0 },
-    baseRatePerKg: { type: Number, default: 0, min: 0 },
     active: { type: Boolean, default: true },
     notes: { type: String, default: "", trim: true },
   },

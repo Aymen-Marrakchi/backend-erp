@@ -68,3 +68,15 @@ exports.cancel = async (req, reply) => {
     return reply.status(err.statusCode || 500).send({ message: err.message });
   }
 };
+
+exports.createFromDeliveryPlan = async (req, reply) => {
+  try {
+    const data = await productionOrderService.createFromDeliveryPlan(
+      req.params.planId,
+      req.user?.id || null
+    );
+    return reply.status(201).send(data);
+  } catch (err) {
+    return reply.status(err.statusCode || 500).send({ message: err.message });
+  }
+};

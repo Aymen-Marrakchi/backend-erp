@@ -6,12 +6,12 @@ exports.getActive = async () => Carrier.find({ active: true }).sort({ name: 1 })
 
 exports.getById = async (id) => Carrier.findById(id);
 
-exports.create = async ({ name, code, contactEmail = "", contactPhone = "", baseRateFlat = 0, baseRatePerKg = 0, notes = "" }) => {
+exports.create = async ({ name, code, contactEmail = "", contactPhone = "", baseRateFlat = 0, notes = "" }) => {
   const exists = await Carrier.findOne({ code: code.trim().toUpperCase() });
   if (exists) {
     throw Object.assign(new Error("Carrier code already exists"), { statusCode: 400 });
   }
-  return Carrier.create({ name, code, contactEmail, contactPhone, baseRateFlat, baseRatePerKg, notes });
+  return Carrier.create({ name, code, contactEmail, contactPhone, baseRateFlat, notes });
 };
 
 exports.update = async (id, data) => {

@@ -18,6 +18,14 @@ exports.getById = async (req, reply) => {
   }
 };
 
+exports.getDiscoveredZones = async (req, reply) => {
+  try {
+    return reply.code(200).send(await deliveryPlanService.getDiscoveredZones());
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
 exports.getUnassignedOrders = async (req, reply) => {
   try {
     return reply

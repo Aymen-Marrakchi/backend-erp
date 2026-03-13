@@ -66,6 +66,20 @@ async function productionOrderRoutes(fastify) {
     productionOrderController.complete
   );
   fastify.post("/:id/cancel", { preHandler: access, schema: { params: idParam } }, productionOrderController.cancel);
+  fastify.post(
+    "/from-plan/:planId",
+    {
+      preHandler: access,
+      schema: {
+        params: {
+          type: "object",
+          required: ["planId"],
+          properties: { planId: { type: "string", minLength: 24, maxLength: 24 } },
+        },
+      },
+    },
+    productionOrderController.createFromDeliveryPlan
+  );
 }
 
 module.exports = productionOrderRoutes;

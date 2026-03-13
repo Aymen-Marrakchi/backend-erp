@@ -1,3 +1,4 @@
+const { protect, requireRole } = require("../../../hooks/auth.hook");
 const backOrderController = require("../controllers/backorder.controller");
 
 const idParam = {
@@ -7,8 +8,10 @@ const idParam = {
 };
 
 module.exports = async (fastify) => {
-  fastify.get("/", { onRequest: [fastify.authenticate] }, backOrderController.getAll);
-  fastify.get("/:id", { onRequest: [fastify.authenticate], schema: { params: idParam } }, backOrderController.getById);
-  fastify.post("/:id/fulfill", { onRequest: [fastify.authenticate], schema: { params: idParam } }, backOrderController.fulfill);
-  fastify.post("/:id/cancel", { onRequest: [fastify.authenticate], schema: { params: idParam } }, backOrderController.cancel);
+  const access = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER")];
+
+  fastify.get("/", { preHandler: access }, backOrderController.getAll);
+  fastify.get("/:id", { preHandler: access, schema: { params: idParam } }, backOrderController.getById);
+  fastify.post("/:id/fulfill", { preHandler: access, schema: { params: idParam } }, backOrderController.fulfill);
+  fastify.post("/:id/cancel", { preHandler: access, schema: { params: idParam } }, backOrderController.cancel);
 };

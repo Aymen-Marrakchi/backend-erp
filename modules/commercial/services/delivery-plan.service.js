@@ -28,7 +28,6 @@ async function generatePlanNo(planDate) {
 const populatePlan = (query) =>
   query
     .populate("carrierId")
-    .populate("vehicleId", "matricule capacityKg capacityPackets")
     .populate({
       path: "orderIds",
       populate: { path: "lines.productId", select: "name sku" },
@@ -59,14 +58,23 @@ exports.getUnassignedShippedOrders = async () => {
     .sort({ shippedAt: 1 });
 };
 
+exports.getDiscoveredZones = async () => {
+  const plans = await DeliveryPlan.find({
+    planType: "DISCOVER",
+    status: { $ne: "CANCELLED" },
+    zone: { $ne: "" },
+  }).select("zone");
+  return [...new Set(plans.map((p) => p.zone).filter(Boolean))];
+};
+
 exports.create = async ({
   planDate,
   carrierId = null,
-  vehicleId = null,
   zone = "",
   startDate = null,
   orderIds = [],
   notes = "",
+  planType = "SHIPMENT",
   createdBy = null,
 }) => {
   const planNo = await generatePlanNo(planDate);
@@ -75,11 +83,11 @@ exports.create = async ({
     planNo,
     planDate,
     carrierId,
-    vehicleId,
     zone,
     startDate,
     orderIds,
     notes,
+    planType,
     createdBy,
   });
 
@@ -121,12 +129,24 @@ exports.complete = async (id) => {
     );
   }
 
-  // Auto-deliver all orders in the plan
-  const now = new Date();
-  await SalesOrder.updateMany(
-    { _id: { $in: plan.orderIds }, status: "SHIPPED" },
-    { $set: { status: "DELIVERED", deliveredAt: now } }
+  const relatedOrders = await SalesOrder.find({ _id: { $in: plan.orderIds } }).select(
+    "orderNo status"
   );
+  const pendingOrders = relatedOrders.filter(
+    (order) => !["DELIVERED", "CLOSED", "CANCELLED"].includes(order.status)
+  );
+  if (pendingOrders.length > 0) {
+    throw Object.assign(
+      new Error(
+        `All plan orders must be delivered before completion: ${pendingOrders
+          .map((order) => order.orderNo)
+          .join(", ")}`
+      ),
+      { statusCode: 400 }
+    );
+  }
+
+  const now = new Date();
 
   plan.status = "COMPLETED";
   plan.completedAt = now;

@@ -15,11 +15,11 @@ const createBody = {
   properties: {
     planDate: { type: "string" },
     carrierId: { type: "string", minLength: 24, maxLength: 24 },
-    vehicleId: { type: "string", minLength: 24, maxLength: 24 },
     zone: { type: "string" },
     startDate: { type: "string" },
     orderIds: { type: "array", items: { type: "string" } },
     notes: { type: "string" },
+    planType: { type: "string", enum: ["SHIPMENT", "DISCOVER"] },
   },
 };
 
@@ -28,6 +28,7 @@ async function deliveryPlanRoutes(fastify) {
 
   fastify.get("/", { preHandler: access }, ctrl.getAll);
   fastify.get("/unassigned", { preHandler: access }, ctrl.getUnassignedOrders);
+  fastify.get("/discovered-zones", { preHandler: access }, ctrl.getDiscoveredZones);
   fastify.get("/:id", { preHandler: access, schema: { params: idParam } }, ctrl.getById);
   fastify.post("/", { preHandler: access, schema: { body: createBody } }, ctrl.create);
   fastify.post("/:id/start", { preHandler: access, schema: { params: idParam } }, ctrl.startDelivery);

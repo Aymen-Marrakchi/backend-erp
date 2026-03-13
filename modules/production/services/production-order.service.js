@@ -1,6 +1,18 @@
 const ProductionOrder = require("../models/production-order.model");
 const StockItem = require("../../stock/models/stock-item.model");
 const StockMovement = require("../../stock/models/stock-movement.model");
+const DeliveryPlan = require("../../commercial/models/delivery-plan.model");
+
+const PRIORITY_RANK = { LOW: 0, NORMAL: 1, HIGH: 2, URGENT: 3 };
+
+function derivePriority(order, planDate) {
+  if (order.isUrgent) return "URGENT";
+  if (order.promisedDate) {
+    const days = (new Date(order.promisedDate) - new Date(planDate)) / 86400000;
+    if (days <= 3) return "HIGH";
+  }
+  return "NORMAL";
+}
 
 const populate = (q) =>
   q
@@ -126,4 +138,71 @@ exports.cancel = async (id) => {
     throw Object.assign(new Error("Cannot cancel a completed order"), { statusCode: 400 });
   order.status = "CANCELLED";
   return order.save();
+};
+
+/**
+ * Generate production orders from a SHIPMENT delivery plan.
+ * Aggregates quantities per product, derives priority from order urgency/promised date,
+ * and validates total quantity against vehicle capacity.
+ */
+exports.createFromDeliveryPlan = async (planId, createdBy) => {
+  const plan = await DeliveryPlan.findById(planId)
+    .populate("vehicleId", "matricule capacityKg capacityPackets")
+    .populate({
+      path: "orderIds",
+      populate: { path: "lines.productId", select: "name sku unit" },
+    });
+
+  if (!plan) throw Object.assign(new Error("Delivery plan not found"), { statusCode: 404 });
+  if (plan.planType !== "SHIPMENT")
+    throw Object.assign(new Error("Only SHIPMENT plans can generate production orders"), { statusCode: 400 });
+  if (plan.status === "CANCELLED")
+    throw Object.assign(new Error("Cannot generate from a cancelled plan"), { statusCode: 400 });
+
+  // Aggregate quantities per product, track highest priority per product
+  const productMap = new Map();
+  for (const order of plan.orderIds) {
+    const priority = derivePriority(order, plan.planDate);
+    for (const line of order.lines) {
+      const pid = String(line.productId._id);
+      if (!productMap.has(pid)) {
+        productMap.set(pid, { productId: pid, quantity: 0, priority: "LOW", salesOrderId: order._id });
+      }
+      const entry = productMap.get(pid);
+      entry.quantity += line.quantity;
+      if (PRIORITY_RANK[priority] > PRIORITY_RANK[entry.priority]) {
+        entry.priority = priority;
+      }
+    }
+  }
+
+  // Vehicle capacity check (capacityPackets = max total units)
+  const totalQty = [...productMap.values()].reduce((sum, e) => sum + e.quantity, 0);
+  const vehicleCapacity = plan.vehicleId?.capacityPackets;
+  if (vehicleCapacity && totalQty > vehicleCapacity) {
+    throw Object.assign(
+      new Error(`Total (${totalQty} unités) dépasse la capacité du véhicule (${vehicleCapacity} colis)`),
+      { statusCode: 400 }
+    );
+  }
+
+  // Create production orders sorted by priority (highest first)
+  const sorted = [...productMap.values()].sort(
+    (a, b) => PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority]
+  );
+
+  const created = [];
+  for (const entry of sorted) {
+    const po = await exports.create({
+      productId: entry.productId,
+      quantity: entry.quantity,
+      priority: entry.priority,
+      salesOrderId: String(entry.salesOrderId),
+      notes: `Généré depuis plan ${plan.planNo}`,
+      createdBy,
+    });
+    created.push(po);
+  }
+
+  return { orders: created, planNo: plan.planNo, totalQty, vehicleCapacity };
 };

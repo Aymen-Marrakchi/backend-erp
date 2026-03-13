@@ -65,13 +65,13 @@ exports.cancelOrder = async (req, reply) => {
 
 exports.shipOrder = async (req, reply) => {
   try {
-    const order = await salesOrderService.shipOrder(
-      req.params.id,
-      req.user?.id || null,
-      req.body?.trackingNumber || "",
-      req.body?.carrierId || null,
-      req.body?.shippingCost || 0
-    );
+    const order = await salesOrderService.shipOrder(req.params.id, req.user?.id || null, {
+      trackingNumber: req.body?.trackingNumber || "",
+      carrierId: req.body?.carrierId || null,
+      vehicleId: req.body?.vehicleId || null,
+      shippingCost: req.body?.shippingCost || 0,
+      shipmentAddress: req.body?.shipmentAddress || "",
+    });
     return reply.code(200).send(order);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
@@ -109,6 +109,15 @@ exports.requestShipApproval = async (req, reply) => {
 exports.approveShip = async (req, reply) => {
   try {
     const order = await salesOrderService.approveShip(req.params.id, req.user?.id || null);
+    return reply.code(200).send(order);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.closeOrder = async (req, reply) => {
+  try {
+    const order = await salesOrderService.closeOrder(req.params.id);
     return reply.code(200).send(order);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });

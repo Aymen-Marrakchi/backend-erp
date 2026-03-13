@@ -48,13 +48,10 @@ fastify.register(require("@fastify/swagger-ui"), {
 });
 fastify.register(require("@fastify/cors"), {
   origin: (origin, cb) => {
-    const allowedOrigins = [
-      "http://localhost:3000",
-      "http://localhost:5000",
-      "http://127.0.0.1:5000",
-    ];
+    const isLocalDevOrigin =
+      !origin || /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
 
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (isLocalDevOrigin) {
       cb(null, true);
     } else {
       cb(new Error("Not allowed by CORS"), false);
@@ -93,6 +90,9 @@ fastify.register(require("./modules/commercial/routes/carrier.routes"), {
 fastify.register(require("./modules/commercial/routes/vehicle.routes"), {
   prefix: "/api/commercial/vehicles",
 });
+fastify.register(require("./modules/commercial/routes/rma.routes"), {
+  prefix: "/api/commercial/rmas",
+});
 fastify.register(require("./modules/commercial/routes/delivery-plan.routes"), {
   prefix: "/api/commercial/delivery-plans",
 });
@@ -107,6 +107,9 @@ fastify.register(require("./modules/production/routes/work-center.routes"), {
 });
 fastify.register(require("./modules/production/routes/production-order.routes"), {
   prefix: "/api/production/orders",
+});
+fastify.register(require("./modules/production/routes/cyclic-order.routes"), {
+  prefix: "/api/production/cyclic-orders",
 });
 
 // Department routes — one factory, three registrations

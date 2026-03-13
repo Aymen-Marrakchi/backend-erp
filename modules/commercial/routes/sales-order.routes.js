@@ -3,11 +3,8 @@ const salesOrderController = require("../controllers/sales-order.controller");
 const { idParam, createSalesOrderBody, shipOrderBody, markUrgentBody, rejectShipBody } = require("../schemas/sales-order.schema");
 
 async function salesOrderRoutes(fastify) {
-  // Full commercial access (managers only)
   const managerAccess = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER")];
-
-  // Warehouse operators can also read + prepare + ship
-  const operatorAccess = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER", "WAREHOUSE_OPERATOR")];
+  const operatorAccess = managerAccess;
 
   fastify.get("/", { preHandler: operatorAccess }, salesOrderController.getAllOrders);
 
@@ -42,7 +39,12 @@ async function salesOrderRoutes(fastify) {
     salesOrderController.deliverOrder
   );
 
-  // Prepare + ship: warehouse operators allowed
+  fastify.post(
+    "/:id/close",
+    { preHandler: managerAccess, schema: { params: idParam } },
+    salesOrderController.closeOrder
+  );
+
   fastify.post(
     "/:id/prepare",
     { preHandler: operatorAccess, schema: { params: idParam } },
@@ -62,7 +64,6 @@ async function salesOrderRoutes(fastify) {
     salesOrderController.markUrgent
   );
 
-  // Approval requests: operators (and managers)
   fastify.post(
     "/:id/request-approval",
     { preHandler: operatorAccess, schema: { params: idParam } },
