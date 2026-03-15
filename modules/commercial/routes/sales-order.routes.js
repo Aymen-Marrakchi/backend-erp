@@ -1,6 +1,14 @@
 const { protect, requireRole } = require("../../../hooks/auth.hook");
 const salesOrderController = require("../controllers/sales-order.controller");
-const { idParam, createSalesOrderBody, shipOrderBody, markUrgentBody, rejectShipBody } = require("../schemas/sales-order.schema");
+const {
+  idParam,
+  createSalesOrderBody,
+  shipOrderBody,
+  markUrgentBody,
+  rejectShipBody,
+  ordonanceOrderBody,
+  bulkOrdonanceOrderBody,
+} = require("../schemas/sales-order.schema");
 
 async function salesOrderRoutes(fastify) {
   const managerAccess = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER")];
@@ -19,6 +27,18 @@ async function salesOrderRoutes(fastify) {
     "/",
     { preHandler: managerAccess, schema: { body: createSalesOrderBody } },
     salesOrderController.createOrder
+  );
+
+  fastify.post(
+    "/:id/ordonance",
+    { preHandler: managerAccess, schema: { params: idParam, body: ordonanceOrderBody } },
+    salesOrderController.ordonanceOrder
+  );
+
+  fastify.post(
+    "/ordonance/bulk",
+    { preHandler: managerAccess, schema: { body: bulkOrdonanceOrderBody } },
+    salesOrderController.ordonanceOrders
   );
 
   fastify.post(
@@ -49,6 +69,18 @@ async function salesOrderRoutes(fastify) {
     "/:id/prepare",
     { preHandler: operatorAccess, schema: { params: idParam } },
     salesOrderController.prepareOrder
+  );
+
+  fastify.post(
+    "/:id/print-picking-slip",
+    { preHandler: operatorAccess, schema: { params: idParam } },
+    salesOrderController.markPickingSlipPrinted
+  );
+
+  fastify.post(
+    "/:id/validate-packing",
+    { preHandler: operatorAccess, schema: { params: idParam } },
+    salesOrderController.validatePacking
   );
 
   fastify.post(

@@ -39,6 +39,19 @@ exports.getAll = async () =>
 
 exports.getById = async (id) => populatePlan(DeliveryPlan.findById(id));
 
+exports.getDiscoveredZones = async () => {
+  const zones = await DeliveryPlan.find({
+    planType: "DISCOVER",
+    status: { $ne: "CANCELLED" },
+    zone: { $ne: "" },
+  }).distinct("zone");
+
+  return zones
+    .map((zone) => String(zone || "").trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+};
+
 /**
  * Shipped orders not currently assigned to an active (PLANNED/IN_PROGRESS) plan.
  */
@@ -58,15 +71,6 @@ exports.getUnassignedShippedOrders = async () => {
     .sort({ shippedAt: 1 });
 };
 
-exports.getDiscoveredZones = async () => {
-  const plans = await DeliveryPlan.find({
-    planType: "DISCOVER",
-    status: { $ne: "CANCELLED" },
-    zone: { $ne: "" },
-  }).select("zone");
-  return [...new Set(plans.map((p) => p.zone).filter(Boolean))];
-};
-
 exports.create = async ({
   planDate,
   carrierId = null,
@@ -77,17 +81,32 @@ exports.create = async ({
   planType = "SHIPMENT",
   createdBy = null,
 }) => {
+  const normalizedPlanType = String(planType || "SHIPMENT").toUpperCase();
+  const normalizedZone = String(zone || "").trim();
+
+  if (!["SHIPMENT", "DISCOVER"].includes(normalizedPlanType)) {
+    throw Object.assign(new Error("Invalid delivery plan type"), {
+      statusCode: 400,
+    });
+  }
+
+  if (normalizedPlanType === "DISCOVER" && !normalizedZone) {
+    throw Object.assign(new Error("Zone is required for discover plans"), {
+      statusCode: 400,
+    });
+  }
+
   const planNo = await generatePlanNo(planDate);
 
   const plan = await DeliveryPlan.create({
     planNo,
     planDate,
-    carrierId,
-    zone,
+    carrierId: normalizedPlanType === "SHIPMENT" ? carrierId : null,
+    zone: normalizedZone,
     startDate,
-    orderIds,
+    orderIds: normalizedPlanType === "SHIPMENT" ? orderIds : [],
     notes,
-    planType,
+    planType: normalizedPlanType,
     createdBy,
   });
 

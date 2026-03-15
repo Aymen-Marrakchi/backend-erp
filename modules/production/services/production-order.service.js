@@ -1,14 +1,15 @@
 const ProductionOrder = require("../models/production-order.model");
 const StockItem = require("../../stock/models/stock-item.model");
 const StockMovement = require("../../stock/models/stock-movement.model");
-const DeliveryPlan = require("../../commercial/models/delivery-plan.model");
+const BackOrder = require("../../commercial/models/backorder.model");
+const backOrderService = require("../../commercial/services/backorder.service");
 
 const PRIORITY_RANK = { LOW: 0, NORMAL: 1, HIGH: 2, URGENT: 3 };
 
-function derivePriority(order, planDate) {
+function derivePriority(order, referenceDate) {
   if (order.isUrgent) return "URGENT";
   if (order.promisedDate) {
-    const days = (new Date(order.promisedDate) - new Date(planDate)) / 86400000;
+    const days = (new Date(order.promisedDate) - new Date(referenceDate)) / 86400000;
     if (days <= 3) return "HIGH";
   }
   return "NORMAL";
@@ -19,6 +20,7 @@ const populate = (q) =>
     .populate("productId", "name sku unit")
     .populate("workCenterId", "name code type")
     .populate("salesOrderId", "orderNo")
+    .populate("backorderId", "orderNo status")
     .populate("createdBy", "name");
 
 const genOrderNo = async () => {
@@ -30,7 +32,6 @@ exports.getAll = () => populate(ProductionOrder.find().sort({ createdAt: -1 }));
 
 exports.getById = (id) => populate(ProductionOrder.findById(id));
 
-// Returns SCHEDULED + IN_PROGRESS orders overlapping [from, to] for Gantt view
 exports.getTimeline = (from, to) =>
   populate(
     ProductionOrder.find({
@@ -40,11 +41,21 @@ exports.getTimeline = (from, to) =>
     }).sort({ scheduledStart: 1 })
   );
 
-exports.create = async ({ salesOrderId, productId, quantity, priority, estimatedHours, notes, createdBy }) => {
+exports.create = async ({
+  salesOrderId,
+  backorderId,
+  productId,
+  quantity,
+  priority,
+  estimatedHours,
+  notes,
+  createdBy,
+}) => {
   const orderNo = await genOrderNo();
   return ProductionOrder.create({
     orderNo,
     salesOrderId: salesOrderId || null,
+    backorderId: backorderId || null,
     productId,
     quantity,
     priority: priority || "NORMAL",
@@ -57,10 +68,12 @@ exports.create = async ({ salesOrderId, productId, quantity, priority, estimated
 exports.schedule = async (id, { workCenterId, scheduledStart, scheduledEnd }) => {
   const order = await ProductionOrder.findById(id);
   if (!order) throw Object.assign(new Error("Production order not found"), { statusCode: 404 });
-  if (!["DRAFT", "SCHEDULED"].includes(order.status))
+  if (!["DRAFT", "SCHEDULED"].includes(order.status)) {
     throw Object.assign(new Error("Cannot reschedule this order"), { statusCode: 400 });
-  if (new Date(scheduledEnd) <= new Date(scheduledStart))
+  }
+  if (new Date(scheduledEnd) <= new Date(scheduledStart)) {
     throw Object.assign(new Error("End date must be after start date"), { statusCode: 400 });
+  }
 
   order.workCenterId = workCenterId;
   order.scheduledStart = new Date(scheduledStart);
@@ -72,8 +85,9 @@ exports.schedule = async (id, { workCenterId, scheduledStart, scheduledEnd }) =>
 exports.start = async (id) => {
   const order = await ProductionOrder.findById(id);
   if (!order) throw Object.assign(new Error("Production order not found"), { statusCode: 404 });
-  if (order.status !== "SCHEDULED")
+  if (order.status !== "SCHEDULED") {
     throw Object.assign(new Error("Order must be SCHEDULED to start"), { statusCode: 400 });
+  }
   order.status = "IN_PROGRESS";
   order.actualStart = new Date();
   return order.save();
@@ -82,12 +96,11 @@ exports.start = async (id) => {
 exports.complete = async (id, completedQty, userId) => {
   const order = await ProductionOrder.findById(id).populate("productId");
   if (!order) throw Object.assign(new Error("Production order not found"), { statusCode: 404 });
-  if (order.status !== "IN_PROGRESS")
+  if (order.status !== "IN_PROGRESS") {
     throw Object.assign(new Error("Order must be IN_PROGRESS to complete"), { statusCode: 400 });
+  }
 
   const qty = completedQty || order.quantity;
-
-  // Update or create stock item
   let stockItem = await StockItem.findOne({ productId: order.productId._id });
   const previousOnHand = stockItem ? stockItem.quantityOnHand : 0;
 
@@ -104,7 +117,6 @@ exports.complete = async (id, completedQty, userId) => {
     });
   }
 
-  // Record stock movement
   await StockMovement.create({
     productId: order.productId._id,
     type: "ENTRY",
@@ -118,7 +130,7 @@ exports.complete = async (id, completedQty, userId) => {
     sourceId: String(order._id),
     reference: order.orderNo,
     reason: "Production order completed",
-    notes: `Production order ${order.orderNo} completed — ${qty} units added to stock`,
+    notes: `Production order ${order.orderNo} completed - ${qty} units added to stock`,
     createdBy: userId || null,
     status: "POSTED",
   });
@@ -128,81 +140,63 @@ exports.complete = async (id, completedQty, userId) => {
   order.actualEnd = new Date();
   await order.save();
 
+  if (order.backorderId) {
+    try {
+      const backorder = await BackOrder.findById(order.backorderId);
+      if (backorder?.status === "PENDING") {
+        await backOrderService.fulfillBackOrder(String(backorder._id), userId || null);
+      }
+    } catch (_) {
+      // Keep production completion successful even if auto-fulfillment needs manual action.
+    }
+  }
+
   return order;
 };
 
 exports.cancel = async (id) => {
   const order = await ProductionOrder.findById(id);
   if (!order) throw Object.assign(new Error("Production order not found"), { statusCode: 404 });
-  if (order.status === "COMPLETED")
+  if (order.status === "COMPLETED") {
     throw Object.assign(new Error("Cannot cancel a completed order"), { statusCode: 400 });
+  }
   order.status = "CANCELLED";
   return order.save();
 };
 
-/**
- * Generate production orders from a SHIPMENT delivery plan.
- * Aggregates quantities per product, derives priority from order urgency/promised date,
- * and validates total quantity against vehicle capacity.
- */
-exports.createFromDeliveryPlan = async (planId, createdBy) => {
-  const plan = await DeliveryPlan.findById(planId)
-    .populate("vehicleId", "matricule capacityKg capacityPackets")
-    .populate({
-      path: "orderIds",
-      populate: { path: "lines.productId", select: "name sku unit" },
+exports.createFromBackOrder = async (backorderId, createdBy) => {
+  const backorder = await BackOrder.findById(backorderId)
+    .populate("salesOrderId", "orderNo promisedDate isUrgent")
+    .populate("lines.productId", "name sku unit");
+
+  if (!backorder) throw Object.assign(new Error("Backorder not found"), { statusCode: 404 });
+  if (backorder.status !== "PENDING") {
+    throw Object.assign(new Error("Only pending backorders can generate production orders"), {
+      statusCode: 400,
     });
-
-  if (!plan) throw Object.assign(new Error("Delivery plan not found"), { statusCode: 404 });
-  if (plan.planType !== "SHIPMENT")
-    throw Object.assign(new Error("Only SHIPMENT plans can generate production orders"), { statusCode: 400 });
-  if (plan.status === "CANCELLED")
-    throw Object.assign(new Error("Cannot generate from a cancelled plan"), { statusCode: 400 });
-
-  // Aggregate quantities per product, track highest priority per product
-  const productMap = new Map();
-  for (const order of plan.orderIds) {
-    const priority = derivePriority(order, plan.planDate);
-    for (const line of order.lines) {
-      const pid = String(line.productId._id);
-      if (!productMap.has(pid)) {
-        productMap.set(pid, { productId: pid, quantity: 0, priority: "LOW", salesOrderId: order._id });
-      }
-      const entry = productMap.get(pid);
-      entry.quantity += line.quantity;
-      if (PRIORITY_RANK[priority] > PRIORITY_RANK[entry.priority]) {
-        entry.priority = priority;
-      }
-    }
   }
-
-  // Vehicle capacity check (capacityPackets = max total units)
-  const totalQty = [...productMap.values()].reduce((sum, e) => sum + e.quantity, 0);
-  const vehicleCapacity = plan.vehicleId?.capacityPackets;
-  if (vehicleCapacity && totalQty > vehicleCapacity) {
-    throw Object.assign(
-      new Error(`Total (${totalQty} unités) dépasse la capacité du véhicule (${vehicleCapacity} colis)`),
-      { statusCode: 400 }
-    );
-  }
-
-  // Create production orders sorted by priority (highest first)
-  const sorted = [...productMap.values()].sort(
-    (a, b) => PRIORITY_RANK[b.priority] - PRIORITY_RANK[a.priority]
-  );
 
   const created = [];
-  for (const entry of sorted) {
+  for (const line of backorder.lines) {
+    if (!line.quantityBackordered || line.quantityBackordered <= 0) continue;
+
+    const priority = derivePriority(backorder.salesOrderId || {}, new Date());
     const po = await exports.create({
-      productId: entry.productId,
-      quantity: entry.quantity,
-      priority: entry.priority,
-      salesOrderId: String(entry.salesOrderId),
-      notes: `Généré depuis plan ${plan.planNo}`,
+      salesOrderId: backorder.salesOrderId?._id ? String(backorder.salesOrderId._id) : null,
+      backorderId: String(backorder._id),
+      productId: String(line.productId?._id || line.productId),
+      quantity: line.quantityBackordered,
+      priority,
+      notes: `Generated from backorder ${backorder.orderNo}`,
       createdBy,
     });
-    created.push(po);
+    created.push(await exports.getById(po._id));
   }
 
-  return { orders: created, planNo: plan.planNo, totalQty, vehicleCapacity };
+  return {
+    orders: created,
+    backorderId: String(backorder._id),
+    orderNo: backorder.orderNo,
+    totalQty: created.reduce((sum, order) => sum + order.quantity, 0),
+  };
 };

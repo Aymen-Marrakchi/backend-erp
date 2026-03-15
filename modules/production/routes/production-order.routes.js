@@ -19,6 +19,7 @@ const createBody = {
   properties: {
     productId: { type: "string", minLength: 24, maxLength: 24 },
     salesOrderId: { type: "string", minLength: 24, maxLength: 24 },
+    backorderId: { type: "string", minLength: 24, maxLength: 24 },
     quantity: { type: "number", minimum: 1 },
     priority: { type: "string", enum: ["LOW", "NORMAL", "HIGH", "URGENT"] },
     estimatedHours: { type: "number", minimum: 0 },
@@ -67,18 +68,18 @@ async function productionOrderRoutes(fastify) {
   );
   fastify.post("/:id/cancel", { preHandler: access, schema: { params: idParam } }, productionOrderController.cancel);
   fastify.post(
-    "/from-plan/:planId",
+    "/from-backorder/:backorderId",
     {
       preHandler: access,
       schema: {
         params: {
           type: "object",
-          required: ["planId"],
-          properties: { planId: { type: "string", minLength: 24, maxLength: 24 } },
+          required: ["backorderId"],
+          properties: { backorderId: { type: "string", minLength: 24, maxLength: 24 } },
         },
       },
     },
-    productionOrderController.createFromDeliveryPlan
+    productionOrderController.createFromBackOrder
   );
 }
 

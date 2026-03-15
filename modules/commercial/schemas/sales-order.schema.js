@@ -17,6 +17,15 @@ const salesOrderLine = {
   },
 };
 
+const ordonanceLine = {
+  type: "object",
+  required: ["productId", "allocatedQuantity"],
+  properties: {
+    productId: { type: "string", minLength: 24, maxLength: 24 },
+    allocatedQuantity: { type: "number", minimum: 0 },
+  },
+};
+
 const createSalesOrderBody = {
   type: "object",
   required: ["orderNo", "lines"],
@@ -60,10 +69,49 @@ const rejectShipBody = {
   },
 };
 
+const ordonanceOrderBody = {
+  type: "object",
+  required: ["lines"],
+  properties: {
+    lines: {
+      type: "array",
+      minItems: 1,
+      items: ordonanceLine,
+    },
+  },
+};
+
+const bulkOrdonanceOrderBody = {
+  type: "object",
+  required: ["orders"],
+  properties: {
+    orders: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        required: ["orderId", "lines"],
+        properties: {
+          orderId: { type: "string", minLength: 24, maxLength: 24 },
+          plannedStartDate: { type: "string" },
+          plannedEndDate: { type: "string" },
+          lines: {
+            type: "array",
+            minItems: 1,
+            items: ordonanceLine,
+          },
+        },
+      },
+    },
+  },
+};
+
 module.exports = {
   idParam,
   createSalesOrderBody,
   shipOrderBody,
   markUrgentBody,
   rejectShipBody,
+  ordonanceOrderBody,
+  bulkOrdonanceOrderBody,
 };

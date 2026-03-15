@@ -6,8 +6,26 @@ exports.getActive = () => Customer.find({ active: true }).sort({ name: 1 });
 
 exports.getById = (id) => Customer.findById(id);
 
-exports.create = async ({ name, email, phone, company, address, city, notes }) => {
-  return Customer.create({ name, email, phone, company, address, city, notes });
+exports.create = async ({
+  name,
+  email,
+  phone,
+  company,
+  address,
+  city,
+  governorate,
+  notes,
+}) => {
+  return Customer.create({
+    name,
+    email,
+    phone,
+    company,
+    address,
+    city,
+    governorate,
+    notes,
+  });
 };
 
 exports.update = (id, data) =>

@@ -45,9 +45,52 @@ exports.confirmOrder = async (req, reply) => {
   }
 };
 
+exports.ordonanceOrder = async (req, reply) => {
+  try {
+    const order = await salesOrderService.ordonanceOrder(
+      req.params.id,
+      req.body?.lines || [],
+      req.user?.id || null
+    );
+    return reply.code(200).send(order);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.ordonanceOrders = async (req, reply) => {
+  try {
+    const orders = await salesOrderService.ordonanceOrders(
+      req.body?.orders || [],
+      req.user?.id || null
+    );
+    return reply.code(200).send(orders);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
 exports.prepareOrder = async (req, reply) => {
   try {
     const order = await salesOrderService.prepareOrder(req.params.id);
+    return reply.code(200).send(order);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.markPickingSlipPrinted = async (req, reply) => {
+  try {
+    const order = await salesOrderService.markPickingSlipPrinted(req.params.id, req.user?.id || null);
+    return reply.code(200).send(order);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.validatePacking = async (req, reply) => {
+  try {
+    const order = await salesOrderService.validatePacking(req.params.id, req.user?.id || null);
     return reply.code(200).send(order);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
@@ -80,7 +123,7 @@ exports.shipOrder = async (req, reply) => {
 
 exports.deliverOrder = async (req, reply) => {
   try {
-    const order = await salesOrderService.deliverOrder(req.params.id);
+    const order = await salesOrderService.deliverOrder(req.params.id, req.user?.id || null);
     return reply.code(200).send(order);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });

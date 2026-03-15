@@ -23,6 +23,16 @@ const salesOrderLineSchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
+    allocatedQuantity: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    plannedProductionQuantity: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   { _id: false }
 );
@@ -46,9 +56,14 @@ const salesOrderSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    source: {
+      type: String,
+      enum: ["MANUAL", "RECURRING"],
+      default: "MANUAL",
+    },
     status: {
       type: String,
-      enum: ["DRAFT", "CONFIRMED", "PREPARED", "SHIPPED", "DELIVERED", "CLOSED", "CANCELLED"],
+      enum: ["DRAFT", "ORDONNANCED", "CONFIRMED", "PREPARED", "SHIPPED", "DELIVERED", "CLOSED", "CANCELLED"],
       default: "DRAFT",
     },
     lines: {
@@ -64,7 +79,27 @@ const salesOrderSchema = new mongoose.Schema(
       trim: true,
     },
     promisedDate: { type: Date, default: null },
+    plannedStartDate: { type: Date, default: null },
+    plannedEndDate: { type: Date, default: null },
+    ordonnancedAt: { type: Date, default: null },
+    ordonnancedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     preparedAt: { type: Date, default: null },
+    pickingSlipPrintedAt: { type: Date, default: null },
+    pickingSlipPrintedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    packingValidatedAt: { type: Date, default: null },
+    packingValidatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     shippedAt: { type: Date, default: null },
     deliveredAt: { type: Date, default: null },
     closedAt: { type: Date, default: null },

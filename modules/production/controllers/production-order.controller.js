@@ -69,10 +69,10 @@ exports.cancel = async (req, reply) => {
   }
 };
 
-exports.createFromDeliveryPlan = async (req, reply) => {
+exports.createFromBackOrder = async (req, reply) => {
   try {
-    const data = await productionOrderService.createFromDeliveryPlan(
-      req.params.planId,
+    const data = await productionOrderService.createFromBackOrder(
+      req.params.backorderId,
       req.user?.id || null
     );
     return reply.status(201).send(data);

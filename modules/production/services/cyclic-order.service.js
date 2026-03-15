@@ -1,5 +1,6 @@
 const CyclicOrder = require("../models/cyclic-order.model");
-const productionOrderService = require("./production-order.service");
+const SalesOrder = require("../../commercial/models/sales-order.model");
+const salesOrderService = require("../../commercial/services/sales-order.service");
 
 const populate = (q) =>
   q
@@ -11,7 +12,7 @@ exports.getAll = () => populate(CyclicOrder.find().sort({ nextDueDate: 1 }));
 
 exports.getDue = () => {
   const horizon = new Date();
-  horizon.setDate(horizon.getDate() + 14); // next 14 days
+  horizon.setDate(horizon.getDate() + 14);
   return populate(
     CyclicOrder.find({
       active: true,
@@ -64,28 +65,73 @@ exports.toggleActive = async (id) => {
   return exports.getById(order._id);
 };
 
-/**
- * Fire a cyclic order → creates a production order and advances nextDueDate.
- */
 exports.fire = async (id, createdBy) => {
   const cyclic = await CyclicOrder.findById(id).populate("productId", "name sku unit");
   if (!cyclic) throw Object.assign(new Error("Cyclic order not found"), { statusCode: 404 });
   if (!cyclic.active) throw Object.assign(new Error("Cyclic order is inactive"), { statusCode: 400 });
 
-  const productionOrder = await productionOrderService.create({
-    productId: String(cyclic.productId._id),
-    quantity: cyclic.quantity,
-    priority: "NORMAL",
-    notes: `Ordre cyclique — ${cyclic.customerName} — tous les ${cyclic.frequencyDays} jours`,
+  const orderNo = await generateSalesOrderNo();
+  const salesOrder = await salesOrderService.createOrder({
+    orderNo,
+    customerId: String(cyclic.customerId),
+    customerName: cyclic.customerName,
+    source: "RECURRING",
+    lines: [
+      {
+        productId: String(cyclic.productId._id),
+        quantity: cyclic.quantity,
+      },
+    ],
+    notes: `Generated from recurring customer order - every ${cyclic.frequencyDays} days`,
     createdBy,
   });
 
-  // Advance nextDueDate by frequencyDays
-  const nextDue = new Date(cyclic.nextDueDate);
-  nextDue.setDate(nextDue.getDate() + cyclic.frequencyDays);
+  const nextDue = getNextDueDate(cyclic.nextDueDate, cyclic.frequencyDays, new Date());
   cyclic.lastFiredAt = new Date();
   cyclic.nextDueDate = nextDue;
   await cyclic.save();
 
-  return { cyclicOrder: await exports.getById(id), productionOrder };
+  return { cyclicOrder: await exports.getById(id), salesOrder };
 };
+
+let autoProcessing = false;
+
+exports.processDueOrders = async () => {
+  if (autoProcessing) return { processed: 0, skipped: true };
+
+  autoProcessing = true;
+  try {
+    const now = new Date();
+    const dueOrders = await CyclicOrder.find({
+      active: true,
+      nextDueDate: { $lte: now },
+    }).sort({ nextDueDate: 1 });
+
+    let processed = 0;
+    for (const cyclic of dueOrders) {
+      try {
+        await exports.fire(String(cyclic._id), null);
+        processed += 1;
+      } catch (_) {
+        // Keep the processor running even if one recurring order fails.
+      }
+    }
+
+    return { processed, skipped: false };
+  } finally {
+    autoProcessing = false;
+  }
+};
+
+async function generateSalesOrderNo() {
+  const count = await SalesOrder.countDocuments();
+  return `ORD-${String(count + 1).padStart(3, "0")}`;
+}
+
+function getNextDueDate(currentDueDate, frequencyDays, referenceDate) {
+  const nextDue = new Date(currentDueDate);
+  do {
+    nextDue.setDate(nextDue.getDate() + frequencyDays);
+  } while (nextDue <= referenceDate);
+  return nextDue;
+}

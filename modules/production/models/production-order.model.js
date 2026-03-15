@@ -8,6 +8,11 @@ const productionOrderSchema = new mongoose.Schema(
       ref: "SalesOrder",
       default: null,
     },
+    backorderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BackOrder",
+      default: null,
+    },
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "StockProduct",

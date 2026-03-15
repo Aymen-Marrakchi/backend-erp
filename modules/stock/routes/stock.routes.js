@@ -13,6 +13,7 @@ const {
 async function stockRoutes(fastify) {
   const adminOnly = [protect, requireRole("ADMIN")];
   const stockAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER")];
+  const stockReadAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER", "COMMERCIAL_MANAGER")];
   const stockOrDepot = [protect, requireRole("ADMIN", "STOCK_MANAGER", "DEPOT_MANAGER")];
   const depotAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER", "DEPOT_MANAGER")];
 
@@ -25,13 +26,13 @@ async function stockRoutes(fastify) {
 
   fastify.get(
     "/items",
-    { preHandler: stockAccess, schema: { tags: ["Stock"] } },
+    { preHandler: stockReadAccess, schema: { tags: ["Stock"] } },
     stockController.getAllStockItems
   );
 
   fastify.get(
     "/items/:productId",
-    { preHandler: stockAccess, schema: { params: objectIdParam, tags: ["Stock"] } },
+    { preHandler: stockReadAccess, schema: { params: objectIdParam, tags: ["Stock"] } },
     stockController.getStockItemByProductId
   );
 

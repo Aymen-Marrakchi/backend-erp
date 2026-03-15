@@ -4,6 +4,7 @@
 const Fastify = require("fastify");
 const dotenv = require("dotenv");
 const deptRoutes = require("./routes/department.routes");
+const cyclicOrderService = require("./modules/production/services/cyclic-order.service");
 
 dotenv.config();
 
@@ -93,6 +94,12 @@ fastify.register(require("./modules/commercial/routes/vehicle.routes"), {
 fastify.register(require("./modules/commercial/routes/rma.routes"), {
   prefix: "/api/commercial/rmas",
 });
+fastify.register(require("./modules/commercial/routes/notification.routes"), {
+  prefix: "/api/commercial/notifications",
+});
+fastify.register(require("./modules/production/routes/cyclic-order.routes"), {
+  prefix: "/api/commercial/cyclic-orders",
+});
 fastify.register(require("./modules/commercial/routes/delivery-plan.routes"), {
   prefix: "/api/commercial/delivery-plans",
 });
@@ -178,4 +185,15 @@ fastify.setErrorHandler((err, req, reply) => {
 const PORT = process.env.PORT || 5000;
 fastify.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) { fastify.log.error(err); process.exit(1); }
+  const recurringIntervalMs = 60 * 1000;
+
+  cyclicOrderService.processDueOrders().catch((processingError) => {
+    fastify.log.error(processingError);
+  });
+
+  setInterval(() => {
+    cyclicOrderService.processDueOrders().catch((processingError) => {
+      fastify.log.error(processingError);
+    });
+  }, recurringIntervalMs);
 });

@@ -18,6 +18,7 @@ const carrierBody = {
     contactEmail: { type: "string" },
     contactPhone: { type: "string" },
     baseRateFlat: { type: "number", minimum: 0 },
+    transitDays: { type: "number", minimum: 0 },
     notes: { type: "string" },
   },
 };
