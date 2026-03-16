@@ -32,7 +32,7 @@ const integrationEventSchema = new mongoose.Schema(
 
     sourceModule: {
       type: String,
-      enum: ["STOCK", "COMMERCIAL", "ACHAT", "PRODUCTION", null],
+      enum: ["STOCK", "COMMERCIAL", "ACHAT", "PURCHASE", "PRODUCTION", null],
       default: "STOCK",
     },
 

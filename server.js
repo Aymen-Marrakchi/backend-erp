@@ -85,6 +85,9 @@ fastify.register(require("./modules/commercial/routes/backorder.routes"), {
 fastify.register(require("./modules/commercial/routes/customer.routes"), {
   prefix: "/api/commercial/customers",
 });
+fastify.register(require("./modules/commercial/routes/customer-invoice.routes"), {
+  prefix: "/api/commercial/invoices",
+});
 fastify.register(require("./modules/commercial/routes/carrier.routes"), {
   prefix: "/api/commercial/carriers",
 });
@@ -108,6 +111,33 @@ fastify.register(require("./modules/stock/routes/sku-setting.routes"), {
 });
 fastify.register(require("./modules/purchase/routes/purchase-request.routes"), {
   prefix: "/api/purchase/requests",
+});
+fastify.register(require("./modules/purchase/routes/supplier.routes"), {
+  prefix: "/api/purchase/suppliers",
+});
+fastify.register(require("./modules/purchase/routes/tender.routes"), {
+  prefix: "/api/purchase/tenders",
+});
+fastify.register(require("./modules/purchase/routes/purchase-order.routes"), {
+  prefix: "/api/purchase/orders",
+});
+fastify.register(require("./modules/purchase/routes/purchase-receipt.routes"), {
+  prefix: "/api/purchase/receipts",
+});
+fastify.register(require("./modules/purchase/routes/purchase-invoice.routes"), {
+  prefix: "/api/purchase/invoices",
+});
+fastify.register(require("./modules/purchase/routes/purchase-payment.routes"), {
+  prefix: "/api/purchase/payments",
+});
+fastify.register(require("./modules/purchase/routes/purchase-return.routes"), {
+  prefix: "/api/purchase/returns",
+});
+fastify.register(require("./modules/purchase/routes/purchase-setting.routes"), {
+  prefix: "/api/purchase/settings",
+});
+fastify.register(require("./modules/finance/routes/finance.routes"), {
+  prefix: "/api/finance",
 });
 fastify.register(require("./modules/production/routes/work-center.routes"), {
   prefix: "/api/production/work-centers",

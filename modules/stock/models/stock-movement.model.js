@@ -74,7 +74,7 @@ const stockMovementSchema = new mongoose.Schema(
 
     sourceModule: {
       type: String,
-      enum: ["STOCK", "COMMERCIAL", "ACHAT", "PRODUCTION", "FINANCE"],
+      enum: ["STOCK", "COMMERCIAL", "ACHAT", "PURCHASE", "PRODUCTION", "FINANCE"],
       default: "STOCK",
     },
     sourceType: {

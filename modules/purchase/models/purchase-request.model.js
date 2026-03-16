@@ -23,6 +23,20 @@ const purchaseRequestSchema = new mongoose.Schema(
       min: 1,
     },
 
+    department: {
+      type: String,
+      required: true,
+      trim: true,
+      uppercase: true,
+      default: "STOCK",
+    },
+
+    availableBudget: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     reason: {
       type: String,
       required: true,
@@ -37,8 +51,8 @@ const purchaseRequestSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["PENDING", "IN_PROGRESS", "COMPLETED", "REJECTED"],
-      default: "PENDING",
+      enum: ["DRAFT", "SUBMITTED", "APPROVED", "REJECTED"],
+      default: "DRAFT",
       index: true,
     },
 
@@ -58,6 +72,21 @@ const purchaseRequestSchema = new mongoose.Schema(
     handledBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
+      default: null,
+    },
+
+    submittedAt: {
+      type: Date,
+      default: null,
+    },
+
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+
+    rejectedAt: {
+      type: Date,
       default: null,
     },
 

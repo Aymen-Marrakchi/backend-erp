@@ -7,6 +7,8 @@ const stockMovementService = require("../../stock/services/stock-movement.servic
 const stockService = require("../../stock/services/stock.service");
 const backOrderService = require("./backorder.service");
 const notificationService = require("./notification.service");
+const financeService = require("../../finance/services/finance.service");
+const customerInvoiceService = require("./customer-invoice.service");
 
 function addDays(date, days) {
   const next = new Date(date);
@@ -330,6 +332,7 @@ exports.confirmOrder = async (id, userId = null) => {
 
     order.status = "CONFIRMED";
     await order.save();
+    await customerInvoiceService.createOrRefreshFromOrder(order._id, {}, userId);
   } catch (err) {
     // Compensation: release any stock already reserved in this transaction
     for (const item of reservedItems) {
@@ -653,6 +656,7 @@ exports.shipOrder = async (id, userId = null, { trackingNumber = "", carrierId =
   if (shipmentAddress) order.shipmentAddress = shipmentAddress.trim();
   order.shippingCost = shippingCost || 0;
   await order.save();
+  await financeService.recordSalesOrderShipped(order);
   await notificationService.createForShipment(order, userId);
 
   return exports.getOrderById(order._id);
@@ -673,6 +677,7 @@ exports.deliverOrder = async (id, userId = null) => {
   order.status = "DELIVERED";
   order.deliveredAt = new Date();
   await order.save();
+  await financeService.recordSalesOrderDelivered(order);
   await notificationService.createForDelivery(order, userId);
 
   return exports.getOrderById(order._id);

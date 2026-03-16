@@ -20,8 +20,11 @@ exports.createPurchaseRequest = async ({
   requestNo,
   productId,
   requestedQuantity,
+  department = "STOCK",
+  availableBudget = 0,
   reason,
   priority = "NORMAL",
+  status = "DRAFT",
   sourceAlertId = null,
   createdBy = null,
   notes = "",
@@ -40,11 +43,15 @@ exports.createPurchaseRequest = async ({
     requestNo: requestNo.trim().toUpperCase(),
     productId,
     requestedQuantity,
+    department: String(department || "STOCK").trim().toUpperCase(),
+    availableBudget,
     reason,
     priority,
+    status,
     sourceAlertId,
     createdBy,
     notes,
+    submittedAt: status === "SUBMITTED" ? new Date() : null,
   });
 
   return exports.getPurchaseRequestById(request._id);
@@ -54,6 +61,8 @@ exports.createFromAlert = async ({
   alertId,
   requestNo,
   requestedQuantity,
+  department = "STOCK",
+  availableBudget = 0,
   reason = "Purchase request generated from stock alert",
   priority = "NORMAL",
   createdBy = null,
@@ -74,8 +83,11 @@ exports.createFromAlert = async ({
     requestNo,
     productId: alert.productId._id,
     requestedQuantity,
+    department,
+    availableBudget,
     reason,
     priority,
+    status: "SUBMITTED",
     sourceAlertId: alert._id,
     createdBy,
     notes,
@@ -97,12 +109,36 @@ exports.updatePurchaseRequestStatus = async (id, { status, notes = "" }, userId 
     throw Object.assign(new Error("Purchase request not found"), { statusCode: 404 });
   }
 
+  const currentStatus = request.status;
+  const allowedTransitions = {
+    DRAFT: ["SUBMITTED", "REJECTED"],
+    SUBMITTED: ["APPROVED", "REJECTED"],
+    APPROVED: [],
+    REJECTED: [],
+  };
+
+  if (!allowedTransitions[currentStatus]?.includes(status)) {
+    throw Object.assign(
+      new Error(`Cannot move purchase request from ${currentStatus} to ${status}`),
+      { statusCode: 400 }
+    );
+  }
+
   request.status = status;
   request.handledBy = userId || request.handledBy;
   request.notes = notes || request.notes;
 
-  if (status === "COMPLETED") {
+  if (status === "SUBMITTED") {
+    request.submittedAt = new Date();
+  }
+
+  if (status === "APPROVED") {
+    request.approvedAt = new Date();
     request.completedAt = new Date();
+  }
+
+  if (status === "REJECTED") {
+    request.rejectedAt = new Date();
   }
 
   await request.save();
@@ -110,7 +146,7 @@ exports.updatePurchaseRequestStatus = async (id, { status, notes = "" }, userId 
   if (request.sourceAlertId) {
     const alert = await StockAlert.findById(request.sourceAlertId);
     if (alert) {
-      if (status === "COMPLETED") {
+      if (status === "APPROVED") {
         alert.status = "CLOSED";
         alert.closedAt = new Date();
       }
@@ -121,6 +157,10 @@ exports.updatePurchaseRequestStatus = async (id, { status, notes = "" }, userId 
         alert.actionSourceId = null;
         alert.handledBy = null;
         alert.handledAt = null;
+      }
+
+      if (status === "SUBMITTED") {
+        alert.status = "PENDING";
       }
 
       await alert.save();

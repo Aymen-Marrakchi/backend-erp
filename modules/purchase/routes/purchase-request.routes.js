@@ -12,6 +12,8 @@ const createFromAlertBody = {
   properties: {
     requestNo: { type: "string", minLength: 2 },
     requestedQuantity: { type: "number", minimum: 1 },
+    department: { type: "string" },
+    availableBudget: { type: "number", minimum: 0 },
     reason: { type: "string" },
     priority: {
       type: "string",
