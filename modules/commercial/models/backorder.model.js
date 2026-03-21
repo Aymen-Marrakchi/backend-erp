@@ -29,6 +29,13 @@ const backOrderSchema = new mongoose.Schema(
       enum: ["PENDING", "FULFILLED", "CANCELLED"],
       default: "PENDING",
     },
+    productionRequestStatus: {
+      type: String,
+      enum: ["NONE", "PENDING", "DONE"],
+      default: "NONE",
+    },
+    productionRequestedAt: { type: Date, default: null },
+    productionCompletedAt: { type: Date, default: null },
     fulfilledAt: { type: Date, default: null },
     cancelledAt: { type: Date, default: null },
     notes: { type: String, default: "" },

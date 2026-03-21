@@ -36,3 +36,21 @@ exports.cancel = async (req, reply) => {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }
 };
+
+exports.requestProduction = async (req, reply) => {
+  try {
+    const bo = await backOrderService.requestProduction(req.params.id, req.user?.id || null);
+    return reply.code(200).send(bo);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.markProductionDone = async (req, reply) => {
+  try {
+    const bo = await backOrderService.markProductionDone(req.params.id);
+    return reply.code(200).send(bo);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};

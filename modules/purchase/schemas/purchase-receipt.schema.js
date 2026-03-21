@@ -24,9 +24,10 @@ const receiptLineSchema = {
 
 const createReceiptBody = {
   type: "object",
-  required: ["purchaseOrderId", "lines"],
+  required: ["purchaseOrderId", "depotId", "lines"],
   properties: {
     purchaseOrderId: { type: "string", minLength: 24, maxLength: 24 },
+    depotId: { type: "string", minLength: 24, maxLength: 24 },
     lines: { type: "array", minItems: 1, items: receiptLineSchema },
     notes: { type: "string" },
   },

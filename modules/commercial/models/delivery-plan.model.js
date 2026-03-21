@@ -15,6 +15,11 @@ const deliveryPlanSchema = new mongoose.Schema(
       ref: "Carrier",
       default: null,
     },
+    vehicleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Vehicle",
+      default: null,
+    },
     zone: { type: String, default: "", trim: true },
     planType: {
       type: String,
@@ -22,16 +27,20 @@ const deliveryPlanSchema = new mongoose.Schema(
       default: "SHIPMENT",
     },
     startDate: { type: Date, default: null },
+    fuelAddedLiters: { type: Number, default: 0, min: 0 },
     orderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "SalesOrder" }],
     status: {
       type: String,
-      enum: ["PLANNED", "IN_PROGRESS", "COMPLETED", "CANCELLED"],
+      enum: ["PLANNED", "IN_PROGRESS", "COMPLETED", "RETURNED", "CANCELLED"],
       default: "PLANNED",
     },
     notes: { type: String, default: "", trim: true },
     startedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
+    returnedAt: { type: Date, default: null },
     cancelledAt: { type: Date, default: null },
+    returnedOrderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "SalesOrder" }],
+    rmaIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "RMA" }],
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

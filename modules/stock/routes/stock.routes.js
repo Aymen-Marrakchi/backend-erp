@@ -37,6 +37,12 @@ async function stockRoutes(fastify) {
   );
 
   fastify.get(
+    "/availability-by-depot",
+    { preHandler: stockReadAccess, schema: { tags: ["Stock"] } },
+    stockController.getDepotAvailability
+  );
+
+  fastify.get(
     "/movements",
     { preHandler: stockOrDepot, schema: { tags: ["Stock"] } },
     stockController.getAllMovements

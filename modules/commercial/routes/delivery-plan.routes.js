@@ -14,12 +14,23 @@ const createBody = {
   required: ["planDate"],
   properties: {
     planDate: { type: "string" },
+    vehicleId: { type: "string", minLength: 24, maxLength: 24 },
     carrierId: { type: "string", minLength: 24, maxLength: 24 },
     zone: { type: "string" },
     startDate: { type: "string" },
+    fuelAddedLiters: { type: "number", minimum: 0 },
     orderIds: { type: "array", items: { type: "string" } },
     notes: { type: "string" },
     planType: { type: "string", enum: ["SHIPMENT", "DISCOVER"] },
+  },
+};
+
+const returnBody = {
+  type: "object",
+  required: ["reason"],
+  properties: {
+    reason: { type: "string", minLength: 1 },
+    orderId: { type: "string", minLength: 24, maxLength: 24 },
   },
 };
 
@@ -33,6 +44,11 @@ async function deliveryPlanRoutes(fastify) {
   fastify.post("/", { preHandler: access, schema: { body: createBody } }, ctrl.create);
   fastify.post("/:id/start", { preHandler: access, schema: { params: idParam } }, ctrl.startDelivery);
   fastify.post("/:id/complete", { preHandler: access, schema: { params: idParam } }, ctrl.complete);
+  fastify.post(
+    "/:id/return",
+    { preHandler: access, schema: { params: idParam, body: returnBody } },
+    ctrl.returnPlan
+  );
   fastify.post("/:id/cancel", { preHandler: access, schema: { params: idParam } }, ctrl.cancel);
 }
 

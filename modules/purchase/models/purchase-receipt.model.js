@@ -70,6 +70,11 @@ const purchaseReceiptSchema = new mongoose.Schema(
       ref: "Supplier",
       required: true,
     },
+    depotId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Depot",
+      required: true,
+    },
     lines: [purchaseReceiptLineSchema],
     receiptStatus: {
       type: String,

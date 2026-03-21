@@ -1,5 +1,7 @@
 const PurchaseReceipt = require("../models/purchase-receipt.model");
 const PurchaseOrder = require("../models/purchase-order.model");
+const Depot = require("../../stock/models/depot.model");
+const StockProduct = require("../../stock/models/product.model");
 const stockMovementService = require("../../stock/services/stock-movement.service");
 
 async function generateReceiptNo() {
@@ -16,6 +18,7 @@ const populateReceipt = (query) =>
         { path: "lines.productId", select: "name sku" },
       ],
     })
+    .populate("depotId", "name productTypeScope")
     .populate("supplierId", "supplierNo name")
     .populate("lines.productId", "name sku")
     .populate("createdBy", "name email role");
@@ -27,6 +30,7 @@ exports.getReceiptById = async (id) => populateReceipt(PurchaseReceipt.findById(
 
 exports.createReceipt = async ({
   purchaseOrderId,
+  depotId,
   lines = [],
   notes = "",
   createdBy = null,
@@ -44,6 +48,11 @@ exports.createReceipt = async ({
 
   if (!lines.length) {
     throw Object.assign(new Error("Add at least one receipt line"), { statusCode: 400 });
+  }
+
+  const depot = await Depot.findById(depotId).select("status productTypeScope name");
+  if (!depot || depot.status !== "ACTIVE") {
+    throw Object.assign(new Error("Selected depot is not available"), { statusCode: 400 });
   }
 
   const receiptLines = [];
@@ -73,10 +82,28 @@ exports.createReceipt = async ({
     poLine.receivedQuantity = (poLine.receivedQuantity || 0) + line.acceptedQuantity;
 
     if (line.acceptedQuantity > 0) {
+      const product = await StockProduct.findById(poLine.productId).select("type");
+      if (!product) {
+        throw Object.assign(new Error("Product not found"), { statusCode: 404 });
+      }
+
+      const allowed =
+        depot.productTypeScope === "MP_PF" ||
+        (product.type === "MATIERE_PREMIERE" && depot.productTypeScope === "MP") ||
+        (product.type !== "MATIERE_PREMIERE" && depot.productTypeScope === "PF");
+
+      if (!allowed) {
+        throw Object.assign(
+          new Error(`Selected depot cannot receive this product type`),
+          { statusCode: 400 }
+        );
+      }
+
       await stockMovementService.createEntry({
         productId: poLine.productId,
         quantity: line.acceptedQuantity,
         lotRef: line.lotRef || "",
+        depotId,
         sourceModule: "PURCHASE",
         sourceType: "PURCHASE_RECEIPT",
         sourceId: purchaseOrder._id.toString(),
@@ -118,6 +145,7 @@ exports.createReceipt = async ({
     receiptNo: await generateReceiptNo(),
     purchaseOrderId: purchaseOrder._id,
     supplierId: purchaseOrder.supplierId._id,
+    depotId,
     lines: receiptLines,
     receiptStatus: hasRejected ? "LITIGATION" : allReceived ? "FULL" : "PARTIAL",
     notes,

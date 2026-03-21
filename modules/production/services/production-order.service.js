@@ -146,6 +146,7 @@ exports.complete = async (id, completedQty, userId) => {
       if (backorder?.status === "PENDING") {
         await backOrderService.fulfillBackOrder(String(backorder._id), userId || null);
       }
+      await backOrderService.syncProductionStatus(String(order.backorderId));
     } catch (_) {
       // Keep production completion successful even if auto-fulfillment needs manual action.
     }

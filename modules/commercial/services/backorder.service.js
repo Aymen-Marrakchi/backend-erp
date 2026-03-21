@@ -1,6 +1,7 @@
 const BackOrder = require("../models/backorder.model");
 const stockMovementService = require("../../stock/services/stock-movement.service");
 const stockService = require("../../stock/services/stock.service");
+const ProductionOrder = require("../../production/models/production-order.model");
 
 const populateBackOrder = (query) =>
   query
@@ -39,6 +40,83 @@ exports.createBackOrder = async ({
     createdBy,
   });
   return populateBackOrder(BackOrder.findById(bo._id));
+};
+
+exports.upsertBackOrder = async ({
+  salesOrderId,
+  orderNo,
+  customerName,
+  lines,
+  createdBy = null,
+}) => {
+  let bo = await BackOrder.findOne({ salesOrderId, status: "PENDING" });
+
+  if (!bo) {
+    bo = await BackOrder.create({
+      salesOrderId,
+      orderNo,
+      customerName,
+      lines,
+      createdBy,
+    });
+  } else {
+    bo.orderNo = orderNo;
+    bo.customerName = customerName;
+    bo.lines = lines;
+    if (!bo.createdBy && createdBy) bo.createdBy = createdBy;
+    await bo.save();
+  }
+
+  return populateBackOrder(BackOrder.findById(bo._id));
+};
+
+exports.requestProduction = async (id, userId = null) => {
+  const bo = await BackOrder.findById(id);
+  if (!bo) throw Object.assign(new Error("Backorder not found"), { statusCode: 404 });
+  if (bo.status !== "PENDING") {
+    throw Object.assign(new Error("Only pending backorders can request production"), { statusCode: 400 });
+  }
+  if (bo.productionRequestStatus === "PENDING") {
+    throw Object.assign(new Error("Production request already pending"), { statusCode: 400 });
+  }
+
+  const productionOrderService = require("../../production/services/production-order.service");
+  await productionOrderService.createFromBackOrder(String(bo._id), userId || null);
+
+  bo.productionRequestStatus = "PENDING";
+  bo.productionRequestedAt = new Date();
+  bo.productionCompletedAt = null;
+  await bo.save();
+
+  return populateBackOrder(BackOrder.findById(bo._id));
+};
+
+exports.markProductionDone = async (id) => {
+  const bo = await BackOrder.findById(id);
+  if (!bo) throw Object.assign(new Error("Backorder not found"), { statusCode: 404 });
+
+  bo.productionRequestStatus = "DONE";
+  bo.productionCompletedAt = new Date();
+  await bo.save();
+
+  return populateBackOrder(BackOrder.findById(bo._id));
+};
+
+exports.syncProductionStatus = async (backorderId) => {
+  const bo = await BackOrder.findById(backorderId);
+  if (!bo) return null;
+
+  const orders = await ProductionOrder.find({ backorderId: bo._id }).select("status");
+  if (orders.length === 0) return bo;
+
+  const allCompleted = orders.every((order) => order.status === "COMPLETED");
+  if (allCompleted) {
+    bo.productionRequestStatus = "DONE";
+    bo.productionCompletedAt = bo.productionCompletedAt || new Date();
+    await bo.save();
+  }
+
+  return bo;
 };
 
 /**

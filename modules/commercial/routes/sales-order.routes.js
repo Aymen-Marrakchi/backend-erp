@@ -8,17 +8,20 @@ const {
   rejectShipBody,
   ordonanceOrderBody,
   bulkOrdonanceOrderBody,
+  requestProductionBody,
 } = require("../schemas/sales-order.schema");
 
 async function salesOrderRoutes(fastify) {
   const managerAccess = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER")];
-  const operatorAccess = managerAccess;
+  const readAccess = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER", "DEPOT_MANAGER")];
+  const prepareAccess = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER", "DEPOT_MANAGER")];
+  const operatorAccess = [protect, requireRole("ADMIN", "COMMERCIAL_MANAGER", "DEPOT_MANAGER")];
 
-  fastify.get("/", { preHandler: operatorAccess }, salesOrderController.getAllOrders);
+  fastify.get("/", { preHandler: readAccess }, salesOrderController.getAllOrders);
 
   fastify.get(
     "/:id",
-    { preHandler: operatorAccess, schema: { params: idParam } },
+    { preHandler: readAccess, schema: { params: idParam } },
     salesOrderController.getOrderById
   );
 
@@ -39,6 +42,12 @@ async function salesOrderRoutes(fastify) {
     "/ordonance/bulk",
     { preHandler: managerAccess, schema: { body: bulkOrdonanceOrderBody } },
     salesOrderController.ordonanceOrders
+  );
+
+  fastify.post(
+    "/:id/request-production",
+    { preHandler: managerAccess, schema: { params: idParam, body: requestProductionBody } },
+    salesOrderController.requestProduction
   );
 
   fastify.post(
@@ -66,8 +75,20 @@ async function salesOrderRoutes(fastify) {
   );
 
   fastify.post(
+    "/:id/mark-returned",
+    { preHandler: managerAccess, schema: { params: idParam } },
+    salesOrderController.markReturned
+  );
+
+  fastify.post(
+    "/:id/reorder",
+    { preHandler: managerAccess, schema: { params: idParam } },
+    salesOrderController.reorder
+  );
+
+  fastify.post(
     "/:id/prepare",
-    { preHandler: operatorAccess, schema: { params: idParam } },
+    { preHandler: prepareAccess, schema: { params: idParam } },
     salesOrderController.prepareOrder
   );
 

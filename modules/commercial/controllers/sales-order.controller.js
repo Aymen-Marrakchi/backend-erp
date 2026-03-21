@@ -49,7 +49,11 @@ exports.ordonanceOrder = async (req, reply) => {
   try {
     const order = await salesOrderService.ordonanceOrder(
       req.params.id,
-      req.body?.lines || [],
+      {
+        plannedStartDate: req.body?.plannedStartDate,
+        plannedEndDate: req.body?.plannedEndDate,
+        lines: req.body?.lines || [],
+      },
       req.user?.id || null
     );
     return reply.code(200).send(order);
@@ -70,9 +74,22 @@ exports.ordonanceOrders = async (req, reply) => {
   }
 };
 
+exports.requestProduction = async (req, reply) => {
+  try {
+    const backorder = await salesOrderService.requestProduction(
+      req.params.id,
+      { lines: req.body?.lines || [] },
+      req.user?.id || null
+    );
+    return reply.code(200).send(backorder);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
 exports.prepareOrder = async (req, reply) => {
   try {
-    const order = await salesOrderService.prepareOrder(req.params.id);
+    const order = await salesOrderService.prepareOrder(req.params.id, req.user?.id || null);
     return reply.code(200).send(order);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
@@ -162,6 +179,24 @@ exports.closeOrder = async (req, reply) => {
   try {
     const order = await salesOrderService.closeOrder(req.params.id);
     return reply.code(200).send(order);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.markReturned = async (req, reply) => {
+  try {
+    const order = await salesOrderService.markReturned(req.params.id);
+    return reply.code(200).send(order);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.reorder = async (req, reply) => {
+  try {
+    const order = await salesOrderService.reorder(req.params.id, req.user?.id || null);
+    return reply.code(201).send(order);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }

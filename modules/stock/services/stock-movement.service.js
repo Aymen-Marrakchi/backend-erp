@@ -133,6 +133,17 @@ exports.createExit = async ({
   }
 
   const stockItem = await stockService.getOrCreateStockItem(productId);
+  if (depotId) {
+    const depotAvailability = await stockService.getDepotAvailabilityForProduct(productId, depotId);
+    if (depotAvailability.quantityAvailable < quantity) {
+      throw Object.assign(
+        new Error(
+          `Insufficient stock in selected depot: available ${depotAvailability.quantityAvailable}, requested ${quantity}`
+        ),
+        { statusCode: 409 }
+      );
+    }
+  }
   stockService.ensureEnoughAvailableStock(stockItem, quantity);
 
   const previousOnHand = stockItem.quantityOnHand;
@@ -149,12 +160,13 @@ exports.createExit = async ({
     previousOnHand,
     newOnHand: stockItem.quantityOnHand,
     previousReserved,
-    newReserved: stockItem.quantityReserved,
-    lotRef,
-    lotMode,
-    sourceModule,
-    sourceType,
-    sourceId,
+      newReserved: stockItem.quantityReserved,
+      lotRef,
+      lotMode,
+      depotId,
+      sourceModule,
+      sourceType,
+      sourceId,
     reference,
     reason,
     notes,
@@ -185,6 +197,7 @@ exports.createExit = async ({
 exports.reserveStock = async ({
   productId,
   quantity,
+  depotId = null,
   sourceModule = "COMMERCIAL",
   sourceType = "SALES_ORDER_CONFIRMED",
   sourceId = "",
@@ -198,6 +211,17 @@ exports.reserveStock = async ({
   }
 
   const stockItem = await stockService.getOrCreateStockItem(productId);
+  if (depotId) {
+    const depotAvailability = await stockService.getDepotAvailabilityForProduct(productId, depotId);
+    if (depotAvailability.quantityAvailable < quantity) {
+      throw Object.assign(
+        new Error(
+          `Insufficient stock in selected depot: available ${depotAvailability.quantityAvailable}, requested ${quantity}`
+        ),
+        { statusCode: 409 }
+      );
+    }
+  }
   stockService.ensureEnoughAvailableStock(stockItem, quantity);
 
   const previousOnHand = stockItem.quantityOnHand;
@@ -215,6 +239,7 @@ exports.reserveStock = async ({
     newOnHand: stockItem.quantityOnHand,
     previousReserved,
     newReserved: stockItem.quantityReserved,
+    depotId,
     sourceModule,
     sourceType,
     sourceId,
@@ -243,6 +268,7 @@ exports.reserveStock = async ({
 exports.releaseReservation = async ({
   productId,
   quantity,
+  depotId = null,
   sourceModule = "COMMERCIAL",
   sourceType = "SALES_ORDER_RELEASED",
   sourceId = "",
@@ -256,6 +282,17 @@ exports.releaseReservation = async ({
   }
 
   const stockItem = await stockService.getOrCreateStockItem(productId);
+  if (depotId) {
+    const depotAvailability = await stockService.getDepotAvailabilityForProduct(productId, depotId);
+    if (depotAvailability.quantityReserved < quantity) {
+      throw Object.assign(
+        new Error(
+          `Insufficient reserved stock in selected depot: reserved ${depotAvailability.quantityReserved}, requested ${quantity}`
+        ),
+        { statusCode: 409 }
+      );
+    }
+  }
   stockService.ensureEnoughReservedStock(stockItem, quantity);
 
   const previousOnHand = stockItem.quantityOnHand;
@@ -273,6 +310,7 @@ exports.releaseReservation = async ({
     newOnHand: stockItem.quantityOnHand,
     previousReserved,
     newReserved: stockItem.quantityReserved,
+    depotId,
     sourceModule,
     sourceType,
     sourceId,
@@ -303,6 +341,7 @@ exports.deductReservedStock = async ({
   quantity,
   lotRef = "",
   lotMode = undefined,
+  depotId = null,
   sourceModule = "COMMERCIAL",
   sourceType = "SALES_ORDER_SHIPPED",
   sourceId = "",
@@ -316,6 +355,17 @@ exports.deductReservedStock = async ({
   }
 
   const stockItem = await stockService.getOrCreateStockItem(productId);
+  if (depotId) {
+    const depotAvailability = await stockService.getDepotAvailabilityForProduct(productId, depotId);
+    if (depotAvailability.quantityReserved < quantity) {
+      throw Object.assign(
+        new Error(
+          `Insufficient reserved stock in selected depot: reserved ${depotAvailability.quantityReserved}, requested ${quantity}`
+        ),
+        { statusCode: 409 }
+      );
+    }
+  }
   stockService.ensureEnoughReservedStock(stockItem, quantity);
 
   const previousOnHand = stockItem.quantityOnHand;
@@ -336,6 +386,7 @@ exports.deductReservedStock = async ({
     newReserved: stockItem.quantityReserved,
     lotRef,
     lotMode,
+    depotId,
     sourceModule,
     sourceType,
     sourceId,

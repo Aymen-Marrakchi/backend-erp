@@ -7,7 +7,10 @@ const {
 } = require("../schemas/depot.schema");
 
 async function depotRoutes(fastify) {
-  const stockReadAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER", "DEPOT_MANAGER")];
+  const stockReadAccess = [
+    protect,
+    requireRole("ADMIN", "STOCK_MANAGER", "DEPOT_MANAGER", "COMMERCIAL_MANAGER", "PURCHASE_MANAGER"),
+  ];
   const stockManageAccess = [protect, requireRole("STOCK_MANAGER")];
 
   fastify.get(

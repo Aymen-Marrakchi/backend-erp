@@ -17,18 +17,31 @@ const salesOrderLine = {
   },
 };
 
+const allocationEntry = {
+  type: "object",
+  required: ["depotId", "allocatedQuantity"],
+  properties: {
+    depotId: { type: "string", minLength: 24, maxLength: 24 },
+    allocatedQuantity: { type: "number", minimum: 0 },
+  },
+};
+
 const ordonanceLine = {
   type: "object",
-  required: ["productId", "allocatedQuantity"],
+  required: ["lineIndex", "productId", "allocations"],
   properties: {
+    lineIndex: { type: "number", minimum: 0 },
     productId: { type: "string", minLength: 24, maxLength: 24 },
-    allocatedQuantity: { type: "number", minimum: 0 },
+    allocations: {
+      type: "array",
+      items: allocationEntry,
+    },
   },
 };
 
 const createSalesOrderBody = {
   type: "object",
-  required: ["orderNo", "lines"],
+  required: ["lines"],
   properties: {
     orderNo: { type: "string", minLength: 1 },
     customerId: { type: "string", minLength: 24, maxLength: 24 },
@@ -71,8 +84,10 @@ const rejectShipBody = {
 
 const ordonanceOrderBody = {
   type: "object",
-  required: ["lines"],
+  required: ["plannedStartDate", "plannedEndDate", "lines"],
   properties: {
+    plannedStartDate: { type: "string" },
+    plannedEndDate: { type: "string" },
     lines: {
       type: "array",
       minItems: 1,
@@ -106,6 +121,18 @@ const bulkOrdonanceOrderBody = {
   },
 };
 
+const requestProductionBody = {
+  type: "object",
+  required: ["lines"],
+  properties: {
+    lines: {
+      type: "array",
+      minItems: 1,
+      items: ordonanceLine,
+    },
+  },
+};
+
 module.exports = {
   idParam,
   createSalesOrderBody,
@@ -114,4 +141,5 @@ module.exports = {
   rejectShipBody,
   ordonanceOrderBody,
   bulkOrdonanceOrderBody,
+  requestProductionBody,
 };

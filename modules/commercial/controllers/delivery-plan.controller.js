@@ -66,6 +66,20 @@ exports.complete = async (req, reply) => {
   }
 };
 
+exports.returnPlan = async (req, reply) => {
+  try {
+    const plan = await deliveryPlanService.returnPlan(
+      req.params.id,
+      req.user?.id || null,
+      req.body?.reason || "",
+      req.body?.orderId || null
+    );
+    return reply.code(200).send(plan);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
 exports.cancel = async (req, reply) => {
   try {
     const plan = await deliveryPlanService.cancel(req.params.id);

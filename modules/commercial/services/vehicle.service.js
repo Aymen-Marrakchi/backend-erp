@@ -23,6 +23,43 @@ exports.toggleActive = async (id) => {
 };
 
 exports.getDeliveries = async (id) => {
+  const plans = await DeliveryPlan.find({ vehicleId: id })
+    .populate("carrierId", "name code")
+    .populate({
+      path: "orderIds",
+      populate: {
+        path: "lines.productId",
+        select: "name sku",
+      },
+    })
+    .sort({ planDate: -1 });
+
+  if (plans.length > 0) {
+    return plans.map((plan) => ({
+      _id: String(plan._id),
+      planNo: plan.planNo,
+      planDate: plan.planDate,
+      status: plan.status,
+      zone: plan.zone || "",
+      fuelAddedLiters: Number(plan.fuelAddedLiters || 0),
+      orderIds: (plan.orderIds || []).map((order) => ({
+        _id: String(order._id),
+        orderNo: order.orderNo,
+        customerName: order.customerName,
+        status: order.status,
+        shippingCost: order.shippingCost || 0,
+        lines: (order.lines || []).map((line) => ({
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          discount: line.discount || 0,
+          productId: line.productId || null,
+        })),
+      })),
+      carrierId: plan.carrierId || null,
+      completedAt: plan.completedAt || null,
+    }));
+  }
+
   const orders = await SalesOrder.find({ vehicleId: id })
     .populate("carrierId", "name code")
     .populate({
@@ -31,25 +68,15 @@ exports.getDeliveries = async (id) => {
     })
     .sort({ shippedAt: -1 });
 
-  const orderIds = orders.map((order) => order._id);
-  const plans = await DeliveryPlan.find({ orderIds: { $in: orderIds } }).select(
-    "planNo planDate status zone completedAt orderIds"
-  );
-
-  return orders.map((order) => {
-    const linkedPlan = plans.find((plan) =>
-      plan.orderIds.some((planOrderId) => String(planOrderId) === String(order._id))
-    );
-
-    return {
-      _id: String(order._id),
-      planNo: linkedPlan?.planNo || order.orderNo,
-      planDate: linkedPlan?.planDate || order.shippedAt || order.createdAt,
-      status: linkedPlan?.status || order.status,
-      zone: linkedPlan?.zone || "",
-      orderIds: [order],
-      carrierId: order.carrierId || null,
-      completedAt: linkedPlan?.completedAt || order.deliveredAt || null,
-    };
-  });
+  return orders.map((order) => ({
+    _id: String(order._id),
+    planNo: order.orderNo,
+    planDate: order.shippedAt || order.createdAt,
+    status: order.status,
+    zone: "",
+    fuelAddedLiters: 0,
+    orderIds: [order],
+    carrierId: order.carrierId || null,
+    completedAt: order.deliveredAt || null,
+  }));
 };

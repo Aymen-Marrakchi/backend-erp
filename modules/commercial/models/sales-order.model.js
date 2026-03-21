@@ -28,10 +28,24 @@ const salesOrderLineSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    depotId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Depot",
+      default: null,
+    },
     plannedProductionQuantity: {
       type: Number,
       default: 0,
       min: 0,
+    },
+    depotPreparedAt: {
+      type: Date,
+      default: null,
+    },
+    depotPreparedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
     },
   },
   { _id: false }
@@ -56,6 +70,11 @@ const salesOrderSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    splitFromOrderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SalesOrder",
+      default: null,
+    },
     source: {
       type: String,
       enum: ["MANUAL", "RECURRING"],
@@ -63,7 +82,7 @@ const salesOrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["DRAFT", "ORDONNANCED", "CONFIRMED", "PREPARED", "SHIPPED", "DELIVERED", "CLOSED", "CANCELLED"],
+      enum: ["DRAFT", "ORDONNANCED", "CONFIRMED", "PREPARED", "SHIPPED", "DELIVERED", "RETURNED", "CLOSED", "CANCELLED"],
       default: "DRAFT",
     },
     lines: {
@@ -88,6 +107,11 @@ const salesOrderSchema = new mongoose.Schema(
       default: null,
     },
     preparedAt: { type: Date, default: null },
+    preparedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     pickingSlipPrintedAt: { type: Date, default: null },
     pickingSlipPrintedBy: {
       type: mongoose.Schema.Types.ObjectId,

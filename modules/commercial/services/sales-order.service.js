@@ -1,12 +1,14 @@
 const SalesOrder = require("../models/sales-order.model");
 const Customer = require("../models/customer.model");
 const StockProduct = require("../../stock/models/product.model");
+const Depot = require("../../stock/models/depot.model");
 const Vehicle = require("../models/vehicle.model");
 const Carrier = require("../models/carrier.model");
 const stockMovementService = require("../../stock/services/stock-movement.service");
 const stockService = require("../../stock/services/stock.service");
 const backOrderService = require("./backorder.service");
 const notificationService = require("./notification.service");
+const RMA = require("../models/rma.model");
 const financeService = require("../../finance/services/finance.service");
 const customerInvoiceService = require("./customer-invoice.service");
 
@@ -43,21 +45,110 @@ async function suggestedTransitDays() {
   return Math.max(0, Number(fastestCarrier.transitDays || 0));
 }
 
+async function generateNextOrderNo() {
+  const orders = await SalesOrder.find({ orderNo: /^ORD-\d{3,}$/ })
+    .select("orderNo")
+    .lean();
+  const maxNumber = orders.reduce((max, order) => {
+    const match = String(order.orderNo || "").match(/^ORD-(\d+)$/);
+    if (!match) return max;
+    return Math.max(max, Number(match[1]));
+  }, 0);
+  return `ORD-${String(maxNumber + 1).padStart(3, "0")}`;
+}
+
+async function generateSplitOrderNo(baseOrderNo) {
+  const rootOrderNo = String(baseOrderNo).split("/")[0];
+  let index = 1;
+  let candidate = `${rootOrderNo}/${index}`;
+  while (await SalesOrder.exists({ orderNo: candidate })) {
+    index += 1;
+    candidate = `${rootOrderNo}/${index}`;
+  }
+  return candidate;
+}
+
 const populateOrder = (query) =>
   query
     .populate("lines.productId")
+    .populate("lines.depotId", "name productTypeScope status")
+    .populate("lines.depotPreparedBy", "name email role")
     .populate("createdBy", "name email role")
     .populate("ordonnancedBy", "name email role")
+    .populate("preparedBy", "name email role")
     .populate("pickingSlipPrintedBy", "name email role")
     .populate("packingValidatedBy", "name email role")
     .populate("carrierId")
     .populate("vehicleId", "matricule capacityPackets capacityKg")
     .populate("customerId", "name email phone company");
 
+async function synchronizePreparationState(order) {
+  if (!order) return order;
+
+  const depotScopedLines = order.lines.filter(
+    (line) => line.depotId && Number(line.quantity || 0) > 0
+  );
+
+  if (depotScopedLines.length === 0) {
+    return order;
+  }
+
+  const allDepotLinesPrepared = depotScopedLines.every((line) => Boolean(line.depotPreparedAt));
+
+  if (allDepotLinesPrepared && order.status === "ORDONNANCED") {
+    const preparedDates = depotScopedLines
+      .map((line) => line.depotPreparedAt)
+      .filter(Boolean)
+      .map((value) => new Date(value));
+    const latestPreparedAt =
+      preparedDates.length > 0
+        ? new Date(Math.max(...preparedDates.map((date) => date.getTime())))
+        : new Date();
+    const preparedBy = depotScopedLines.find((line) => line.depotPreparedBy)?.depotPreparedBy || order.preparedBy;
+
+    order.status = "PREPARED";
+    order.preparedAt = order.preparedAt || latestPreparedAt;
+    order.preparedBy = order.preparedBy || preparedBy || null;
+    await order.save();
+  }
+
+  return order;
+}
+
 async function getPendingBackOrderForOrder(orderId) {
   const backOrder = await backOrderService.getBySalesOrder(orderId);
   if (backOrder?.status === "PENDING") return backOrder;
   return null;
+}
+
+function buildBackOrderLinesFromPlan(order, allocationLines = []) {
+  const allocations = new Map(
+    allocationLines.map((line) => [
+      Number(line.lineIndex),
+      (line.allocations || []).reduce(
+        (sum, entry) => sum + Math.max(0, Number(entry.allocatedQuantity || 0)),
+        0
+      ),
+    ])
+  );
+
+  return order.lines
+    .map((line, lineIndex) => {
+      const allocatedQuantity = Math.min(
+        Number(line.quantity || 0),
+        allocations.has(lineIndex)
+          ? allocations.get(lineIndex)
+          : Number(line.allocatedQuantity || 0)
+      );
+      const quantityBackordered = Math.max(0, Number(line.quantity || 0) - allocatedQuantity);
+      return {
+        productId: line.productId,
+        quantityOrdered: Number(line.quantity || 0),
+        quantityReserved: allocatedQuantity,
+        quantityBackordered,
+      };
+    })
+    .filter((line) => line.quantityBackordered > 0);
 }
 
 async function getPlannedAllocationsByProduct(excludeOrderId = null) {
@@ -83,23 +174,72 @@ async function getPlannedAllocationsByProduct(excludeOrderId = null) {
   return planned;
 }
 
+async function getPlannedAllocationsByProductDepot(excludeOrderId = null) {
+  const exclusion =
+    Array.isArray(excludeOrderId) && excludeOrderId.length > 0
+      ? { _id: { $nin: excludeOrderId } }
+      : excludeOrderId
+        ? { _id: { $ne: excludeOrderId } }
+        : {};
+  const orders = await SalesOrder.find({
+    status: "ORDONNANCED",
+    ...exclusion,
+  }).select("lines.productId lines.depotId lines.allocatedQuantity");
+
+  const planned = new Map();
+  for (const order of orders) {
+    for (const line of order.lines) {
+      const allocated = Number(line.allocatedQuantity || 0);
+      if (allocated <= 0) continue;
+      planned.set(
+        availabilityKey(line.productId, line.depotId),
+        (planned.get(availabilityKey(line.productId, line.depotId)) || 0) + allocated
+      );
+    }
+  }
+  return planned;
+}
+
+function availabilityKey(productId, depotId = null) {
+  return `${String(productId)}::${depotId ? String(depotId) : "UNASSIGNED"}`;
+}
+
 async function applyOrdonnancement(orders, payloads, userId) {
   const lineAllocationsByOrder = new Map(
     payloads.map((entry) => [
       String(entry.orderId || entry._id),
       new Map(
-        (entry.lines || []).map((line) => [String(line.productId), Number(line.allocatedQuantity || 0)])
+        (entry.lines || []).map((line) => [
+          Number(line.lineIndex),
+          (line.allocations || []).map((allocation) => ({
+            allocatedQuantity: Number(allocation.allocatedQuantity || 0),
+            depotId: allocation.depotId ? String(allocation.depotId) : null,
+          })),
+        ])
       ),
     ])
   );
   const orderIds = orders.map((order) => order._id);
   const plannedAllocations = await getPlannedAllocationsByProduct(orderIds);
-  const stockCache = new Map();
+  const plannedAllocationsByDepot = await getPlannedAllocationsByProductDepot(orderIds);
+  const availabilitySnapshot = await stockService.getDepotAvailability();
+  const availableByProductDepot = new Map(
+    availabilitySnapshot.rows.map((row) => [
+      availabilityKey(row.productId, row.depotId),
+      Number(row.quantityAvailable || 0),
+    ])
+  );
   const requestedByProduct = new Map();
+  const requestedByProductDepot = new Map();
+  const productsCache = new Map();
+  const depotsCache = new Map();
 
   for (const order of orders) {
-    if (order.status !== "DRAFT") {
-      throw Object.assign(new Error("Only draft orders can be ordonnanced"), { statusCode: 400 });
+    if (!["CONFIRMED", "ORDONNANCED"].includes(order.status)) {
+      throw Object.assign(
+        new Error("Only confirmed or incomplete ordonnanced orders can be planned here"),
+        { statusCode: 400 }
+      );
     }
 
     const payload = payloads.find((entry) => String(entry.orderId || entry._id) === String(order._id)) || {};
@@ -115,27 +255,80 @@ async function applyOrdonnancement(orders, payloads, userId) {
     }
 
     const lineAllocations = lineAllocationsByOrder.get(String(order._id)) || new Map();
-    for (const line of order.lines) {
+    for (let lineIndex = 0; lineIndex < order.lines.length; lineIndex += 1) {
+      const line = order.lines[lineIndex];
       const productId = String(line.productId);
-      const allocatedQuantity = Math.max(0, Number(lineAllocations.get(productId) || 0));
+      const allocations = (lineAllocations.get(lineIndex) || []).filter(
+        (allocation) => Number(allocation.allocatedQuantity || 0) > 0
+      );
+      const totalAllocated = allocations.reduce(
+        (sum, allocation) => sum + Math.max(0, Number(allocation.allocatedQuantity || 0)),
+        0
+      );
 
-      if (allocatedQuantity > line.quantity) {
+      if (totalAllocated > line.quantity) {
         throw Object.assign(
           new Error(`Allocated quantity cannot exceed ordered quantity for product ${productId}`),
           { statusCode: 400 }
         );
       }
 
-      requestedByProduct.set(productId, (requestedByProduct.get(productId) || 0) + allocatedQuantity);
+      for (const allocation of allocations) {
+        const allocatedQuantity = Math.max(0, Number(allocation.allocatedQuantity || 0));
+        const depotId = allocation.depotId ? String(allocation.depotId) : null;
+        if (allocatedQuantity > 0 && !depotId) {
+          throw Object.assign(
+            new Error(`Select a depot for allocated quantity on product ${productId}`),
+            { statusCode: 400 }
+          );
+        }
+
+        let depot = depotsCache.get(depotId);
+        if (!depot) {
+          depot = await Depot.findById(depotId).select("status productTypeScope");
+          depotsCache.set(depotId, depot);
+        }
+        if (!depot || depot.status !== "ACTIVE") {
+          throw Object.assign(new Error(`Selected depot is not available for product ${productId}`), {
+            statusCode: 400,
+          });
+        }
+
+        let product = productsCache.get(productId);
+        if (!product) {
+          product = await StockProduct.findById(productId).select("type");
+          productsCache.set(productId, product);
+        }
+        const isRawMaterial = product?.type === "MATIERE_PREMIERE";
+        const allowed =
+          depot.productTypeScope === "MP_PF" ||
+          (isRawMaterial && depot.productTypeScope === "MP") ||
+          (!isRawMaterial && depot.productTypeScope === "PF");
+
+        if (!allowed) {
+          throw Object.assign(
+            new Error(`Selected depot cannot serve product ${productId} for this product type`),
+            { statusCode: 400 }
+          );
+        }
+        requestedByProduct.set(productId, (requestedByProduct.get(productId) || 0) + allocatedQuantity);
+        requestedByProductDepot.set(
+          availabilityKey(productId, depotId),
+          (requestedByProductDepot.get(availabilityKey(productId, depotId)) || 0) + allocatedQuantity
+        );
+      }
     }
   }
 
   for (const [productId, totalAllocated] of requestedByProduct.entries()) {
-    const stockItem = await stockService.getOrCreateStockItem(productId);
-    stockCache.set(productId, stockItem);
+    await stockService.getOrCreateStockItem(productId);
     const availableForPlanning = Math.max(
       0,
-      stockItem.quantityOnHand - stockItem.quantityReserved - (plannedAllocations.get(productId) || 0)
+      (availableByProductDepot.get(availabilityKey(productId, null)) || 0) +
+        Array.from(availableByProductDepot.entries())
+          .filter(([key]) => key.startsWith(`${productId}::`) && !key.endsWith("UNASSIGNED"))
+          .reduce((sum, [, qty]) => sum + qty, 0) -
+        (plannedAllocations.get(productId) || 0)
     );
 
     if (totalAllocated > availableForPlanning) {
@@ -148,33 +341,174 @@ async function applyOrdonnancement(orders, payloads, userId) {
     }
   }
 
+  for (const [key, totalAllocated] of requestedByProductDepot.entries()) {
+    const [productId, depotToken] = key.split("::");
+    const depotId = depotToken === "UNASSIGNED" ? null : depotToken;
+    const availableAtDepotForPlanning = Math.max(
+      0,
+      (availableByProductDepot.get(key) || 0) - (plannedAllocationsByDepot.get(key) || 0)
+    );
+
+    if (depotId && totalAllocated > availableAtDepotForPlanning) {
+      throw Object.assign(
+        new Error(
+          `Allocated quantity for product ${productId} exceeds available quantity in the selected depot (${availableAtDepotForPlanning})`
+        ),
+        { statusCode: 409 }
+      );
+    }
+  }
+
   for (const order of orders) {
+    const wasConfirmedBeforePlanning = order.status === "CONFIRMED";
     const payload = payloads.find((entry) => String(entry.orderId || entry._id) === String(order._id)) || {};
     const lineAllocations = lineAllocationsByOrder.get(String(order._id)) || new Map();
-    for (const line of order.lines) {
+    const readyLines = [];
+    const waitingLines = [];
+
+    for (let lineIndex = 0; lineIndex < order.lines.length; lineIndex += 1) {
+      const line = order.lines[lineIndex];
       const productId = String(line.productId);
-      const allocatedQuantity = Math.max(0, Number(lineAllocations.get(productId) || 0));
-      line.allocatedQuantity = allocatedQuantity;
-      line.plannedProductionQuantity = Math.max(0, line.quantity - allocatedQuantity);
+      const allocations = (lineAllocations.get(lineIndex) || []).filter(
+        (allocation) => Number(allocation.allocatedQuantity || 0) > 0
+      );
+      const totalAllocated = allocations.reduce(
+        (sum, allocation) => sum + Math.max(0, Number(allocation.allocatedQuantity || 0)),
+        0
+      );
+      const waitingQuantity = Math.max(0, line.quantity - totalAllocated);
+
+      for (const allocation of allocations) {
+        const allocatedQuantity = Math.max(0, Number(allocation.allocatedQuantity || 0));
+        if (allocatedQuantity <= 0) continue;
+        readyLines.push({
+          productId: line.productId,
+          quantity: allocatedQuantity,
+          unitPrice: line.unitPrice,
+          discount: line.discount,
+          allocatedQuantity,
+          depotId: allocation.depotId || null,
+          plannedProductionQuantity: 0,
+          depotPreparedAt: null,
+          depotPreparedBy: null,
+        });
+      }
+
+      if (waitingQuantity > 0) {
+        waitingLines.push({
+          productId: line.productId,
+          quantity: waitingQuantity,
+          unitPrice: line.unitPrice,
+          discount: line.discount,
+          allocatedQuantity: 0,
+          depotId: null,
+          plannedProductionQuantity: waitingQuantity,
+          depotPreparedAt: null,
+          depotPreparedBy: null,
+        });
+      }
     }
 
-    order.status = "ORDONNANCED";
-    order.plannedStartDate = new Date(payload.plannedStartDate);
-    order.plannedEndDate = new Date(payload.plannedEndDate);
-    order.promisedDate =
-      promiseDateFromPlanning(payload.plannedEndDate, await suggestedTransitDays()) ||
-      order.promisedDate;
-    order.ordonnancedAt = new Date();
-    order.ordonnancedBy = userId;
-    await order.save();
+    if (readyLines.length > 0 && waitingLines.length > 0) {
+      await SalesOrder.create({
+        orderNo: await generateSplitOrderNo(order.orderNo),
+        customerId: order.customerId || null,
+        customerName: order.customerName,
+        splitFromOrderId: order._id,
+        source: order.source || "MANUAL",
+        lines: waitingLines,
+        notes: [order.notes, `Waiting quantity split from ${order.orderNo}`]
+          .filter(Boolean)
+          .join(" | "),
+        promisedDate: order.promisedDate || null,
+        createdBy: userId,
+        isUrgent: order.isUrgent || false,
+      });
+    }
+
+    const reservedItems = [];
+    try {
+      if (wasConfirmedBeforePlanning && readyLines.length > 0) {
+        for (const line of readyLines) {
+          const quantityToReserve = Math.max(0, Number(line.allocatedQuantity || 0));
+          if (quantityToReserve <= 0) continue;
+
+          await stockMovementService.reserveStock({
+            productId: line.productId,
+            quantity: quantityToReserve,
+            depotId: line.depotId || null,
+            sourceModule: "COMMERCIAL",
+            sourceType: "SALES_ORDER_CONFIRMED",
+            sourceId: String(order._id),
+            reference: order.orderNo,
+            reason: "Stock reserved after ordonnancement",
+            notes: `Order ordonnanced for ${order.customerName}`,
+            createdBy: userId,
+          });
+
+          reservedItems.push({
+            productId: line.productId,
+            quantity: quantityToReserve,
+            depotId: line.depotId || null,
+          });
+        }
+      }
+
+      if (readyLines.length > 0) {
+        order.lines = readyLines;
+        order.status = "ORDONNANCED";
+        order.plannedStartDate = new Date(payload.plannedStartDate);
+        order.plannedEndDate = new Date(payload.plannedEndDate);
+        order.promisedDate =
+          promiseDateFromPlanning(payload.plannedEndDate, await suggestedTransitDays()) ||
+          order.promisedDate;
+        order.ordonnancedAt = new Date();
+        order.ordonnancedBy = userId;
+      } else {
+        order.lines = waitingLines;
+        order.status = wasConfirmedBeforePlanning ? "CONFIRMED" : "DRAFT";
+        order.plannedStartDate = null;
+        order.plannedEndDate = null;
+        order.ordonnancedAt = null;
+        order.ordonnancedBy = null;
+      }
+
+      await order.save();
+    } catch (error) {
+      for (const item of reservedItems) {
+        try {
+          await stockMovementService.releaseReservation({
+            productId: item.productId,
+            quantity: item.quantity,
+            depotId: item.depotId || null,
+            sourceModule: "COMMERCIAL",
+            sourceType: "SALES_ORDER_ORDONNANCE_ROLLBACK",
+            sourceId: String(order._id),
+            reference: order.orderNo,
+            reason: "Ordonnancement rollback",
+            createdBy: userId,
+          });
+        } catch (_) {}
+      }
+      throw error;
+    }
   }
 }
 
 exports.getAllOrders = async () => {
-  return populateOrder(SalesOrder.find()).sort({ createdAt: -1 });
+  const orders = await SalesOrder.find().sort({ createdAt: -1 });
+  for (const order of orders) {
+    await synchronizePreparationState(order);
+  }
+  return populateOrder(SalesOrder.find({ _id: { $in: orders.map((order) => order._id) } })).sort({
+    createdAt: -1,
+  });
 };
 
 exports.getOrderById = async (id) => {
+  const order = await SalesOrder.findById(id);
+  if (!order) return null;
+  await synchronizePreparationState(order);
   return populateOrder(SalesOrder.findById(id));
 };
 
@@ -188,9 +522,9 @@ exports.createOrder = async ({
   createdBy = null,
   source = "MANUAL",
 }) => {
-  // Enforce ORD- prefix
-  const rawNo = String(orderNo).trim().toUpperCase().replace(/^ORD-/, "");
-  const finalOrderNo = `ORD-${rawNo}`;
+  const finalOrderNo = orderNo
+    ? `ORD-${String(orderNo).trim().toUpperCase().replace(/^ORD-/, "")}`
+    : await generateNextOrderNo();
 
   const exists = await SalesOrder.findOne({ orderNo: finalOrderNo });
   if (exists) {
@@ -237,13 +571,21 @@ exports.createOrder = async ({
   return exports.getOrderById(order._id);
 };
 
-exports.ordonanceOrder = async (id, lines = [], userId = null) => {
+exports.ordonanceOrder = async (
+  id,
+  { plannedStartDate = null, plannedEndDate = null, lines = [] } = {},
+  userId = null
+) => {
   const order = await SalesOrder.findById(id);
   if (!order) {
     throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
   }
 
-  await applyOrdonnancement([order], [{ orderId: String(order._id), lines }], userId);
+  await applyOrdonnancement(
+    [order],
+    [{ orderId: String(order._id), plannedStartDate, plannedEndDate, lines }],
+    userId
+  );
 
   return exports.getOrderById(order._id);
 };
@@ -267,102 +609,55 @@ exports.ordonanceOrders = async (ordersPayload = [], userId = null) => {
   return Promise.all(orderedList.map((order) => exports.getOrderById(order._id)));
 };
 
+exports.requestProduction = async (id, payload = {}, userId = null) => {
+  const order = await SalesOrder.findById(id);
+  if (!order) {
+    throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
+  }
+
+  const backOrderLines = buildBackOrderLinesFromPlan(order, payload.lines || []);
+  if (backOrderLines.length === 0) {
+    throw Object.assign(new Error("No missing quantity available for production request"), {
+      statusCode: 400,
+    });
+  }
+
+  const backorder = await backOrderService.upsertBackOrder({
+    salesOrderId: order._id,
+    orderNo: order.orderNo,
+    customerName: order.customerName,
+    lines: backOrderLines,
+    createdBy: userId,
+  });
+
+  return backOrderService.requestProduction(String(backorder._id), userId);
+};
+
 exports.confirmOrder = async (id, userId = null) => {
   const order = await SalesOrder.findById(id);
   if (!order) {
     throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
   }
 
-  if (order.status !== "ORDONNANCED") {
-    throw Object.assign(new Error("Only ordonnanced orders can be confirmed"), { statusCode: 400 });
+  if (order.status !== "DRAFT") {
+    throw Object.assign(new Error("Only draft orders can be confirmed"), { statusCode: 400 });
   }
 
-  const backOrderLines = [];
-  const reservedItems = []; // track for compensation rollback
-
-  try {
-    for (const line of order.lines) {
-      const stockItem = await stockService.getOrCreateStockItem(line.productId);
-      const available = stockItem.quantityOnHand - stockItem.quantityReserved;
-      const plannedAllocation = Math.min(line.quantity, Number(line.allocatedQuantity || 0));
-      const toReserve = Math.min(available, plannedAllocation);
-
-      if (toReserve < plannedAllocation) {
-        throw Object.assign(
-          new Error("Planned stock allocation is no longer available. Please re-ordonnance the order."),
-          { statusCode: 409 }
-        );
-      }
-
-      if (toReserve > 0) {
-        await stockMovementService.reserveStock({
-          productId: line.productId,
-          quantity: toReserve,
-          sourceModule: "COMMERCIAL",
-          sourceType: "SALES_ORDER_CONFIRMED",
-          sourceId: String(order._id),
-          reference: order.orderNo,
-          reason: "Stock reserved for sales order",
-          notes: `Order confirmed for ${order.customerName}`,
-          createdBy: userId,
-        });
-        reservedItems.push({ productId: line.productId, quantity: toReserve });
-      }
-
-      const backordered = line.quantity - toReserve;
-      if (backordered > 0) {
-        backOrderLines.push({
-          productId: line.productId,
-          quantityOrdered: line.quantity,
-          quantityReserved: toReserve,
-          quantityBackordered: backordered,
-        });
-      }
-    }
-
-    if (backOrderLines.length > 0) {
-      await backOrderService.createBackOrder({
-        salesOrderId: order._id,
-        orderNo: order.orderNo,
-        customerName: order.customerName,
-        lines: backOrderLines,
-        createdBy: userId,
-      });
-    }
-
-    order.status = "CONFIRMED";
-    await order.save();
-    await customerInvoiceService.createOrRefreshFromOrder(order._id, {}, userId);
-  } catch (err) {
-    // Compensation: release any stock already reserved in this transaction
-    for (const item of reservedItems) {
-      try {
-        await stockMovementService.releaseReservation({
-          productId: item.productId,
-          quantity: item.quantity,
-          sourceModule: "COMMERCIAL",
-          sourceType: "SALES_ORDER_CONFIRM_ROLLBACK",
-          sourceId: String(order._id),
-          reference: order.orderNo,
-          reason: "Order confirmation rolled back",
-          createdBy: userId,
-        });
-      } catch (_) { /* don't mask the original error */ }
-    }
-    throw err;
-  }
+  order.status = "CONFIRMED";
+  await order.save();
+  await customerInvoiceService.createOrRefreshFromOrder(order._id, {}, userId);
 
   return exports.getOrderById(order._id);
 };
 
-exports.prepareOrder = async (id) => {
+exports.prepareOrder = async (id, userId = null) => {
   const order = await SalesOrder.findById(id);
   if (!order) {
     throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
   }
 
-  if (order.status !== "CONFIRMED") {
-    throw Object.assign(new Error("Only confirmed orders can be prepared"), { statusCode: 400 });
+  if (order.status !== "ORDONNANCED") {
+    throw Object.assign(new Error("Only ordonnanced orders can be prepared"), { statusCode: 400 });
   }
 
   const pendingBackOrder = await getPendingBackOrderForOrder(order._id);
@@ -373,8 +668,53 @@ exports.prepareOrder = async (id) => {
     );
   }
 
-  order.status = "PREPARED";
-  order.preparedAt = new Date();
+  const actingDepot = userId ? await Depot.findOne({ managerId: userId }).select("_id") : null;
+  const depotScopedLines = order.lines.filter((line) => line.depotId);
+
+  if (actingDepot) {
+    const targetedLines = order.lines.filter(
+      (line) =>
+        line.depotId &&
+        String(line.depotId) === String(actingDepot._id) &&
+        !line.depotPreparedAt
+    );
+
+    if (targetedLines.length === 0) {
+      throw Object.assign(
+        new Error("No order quantity is assigned to your depot or it has already been prepared"),
+        { statusCode: 400 }
+      );
+    }
+
+    const preparedAt = new Date();
+    for (const line of targetedLines) {
+      line.depotPreparedAt = preparedAt;
+      line.depotPreparedBy = userId;
+    }
+
+    const allDepotLinesPrepared =
+      depotScopedLines.length > 0 &&
+      depotScopedLines.every((line) => Boolean(line.depotPreparedAt));
+
+    if (allDepotLinesPrepared) {
+      order.status = "PREPARED";
+      order.preparedAt = preparedAt;
+      order.preparedBy = userId;
+    }
+  } else {
+    const preparedAt = new Date();
+    for (const line of order.lines) {
+      if (line.depotId && !line.depotPreparedAt) {
+        line.depotPreparedAt = preparedAt;
+        line.depotPreparedBy = userId;
+      }
+    }
+
+    order.status = "PREPARED";
+    order.preparedAt = preparedAt;
+    order.preparedBy = userId;
+  }
+
   await order.save();
 
   return exports.getOrderById(order._id);
@@ -386,9 +726,9 @@ exports.markPickingSlipPrinted = async (id, userId = null) => {
     throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
   }
 
-  if (!["CONFIRMED", "PREPARED"].includes(order.status)) {
+  if (!["ORDONNANCED", "PREPARED"].includes(order.status)) {
     throw Object.assign(
-      new Error("Picking slip can only be printed for confirmed or prepared orders"),
+      new Error("Picking slip can only be printed for ordonnanced or prepared orders"),
       { statusCode: 400 }
     );
   }
@@ -405,6 +745,8 @@ exports.validatePacking = async (id, userId = null) => {
   if (!order) {
     throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
   }
+
+  await synchronizePreparationState(order);
 
   if (order.status !== "PREPARED") {
     throw Object.assign(new Error("Only prepared orders can be packing-validated"), {
@@ -431,9 +773,9 @@ exports.cancelOrder = async (id, userId = null) => {
     throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
   }
 
-  if (!["ORDONNANCED", "CONFIRMED", "PREPARED"].includes(order.status)) {
+  if (order.status !== "DRAFT") {
     throw Object.assign(
-      new Error("Only ordonnanced, confirmed or prepared orders can be cancelled"),
+      new Error("Only draft orders can be cancelled"),
       { statusCode: 400 }
     );
   }
@@ -463,9 +805,10 @@ exports.cancelOrder = async (id, userId = null) => {
     );
 
     if (toRelease > 0) {
-      await stockMovementService.releaseReservation({
+       await stockMovementService.releaseReservation({
         productId: line.productId,
         quantity: toRelease,
+        depotId: line.depotId || null,
         sourceModule: "COMMERCIAL",
         sourceType: "SALES_ORDER_RELEASED",
         sourceId: String(order._id),
@@ -494,7 +837,18 @@ exports.markUrgent = async (id, urgent = true) => {
   }
 
   order.isUrgent = urgent;
-  if (!urgent) {
+  if (urgent) {
+    order.shipApproval = {
+      status: "PENDING",
+      requestedAt: new Date(),
+      requestedBy: null,
+      approvedAt: null,
+      approvedBy: null,
+      rejectedAt: null,
+      rejectedBy: null,
+      rejectionReason: "",
+    };
+  } else {
     order.shipApproval = {
       status: "NONE",
       requestedAt: null,
@@ -516,8 +870,10 @@ exports.requestShipApproval = async (id, userId = null) => {
     throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
   }
 
-  if (order.status !== "PREPARED") {
-    throw Object.assign(new Error("Only prepared orders can request ship approval"), { statusCode: 400 });
+  if (["SHIPPED", "DELIVERED", "RETURNED", "CLOSED", "CANCELLED"].includes(order.status)) {
+    throw Object.assign(new Error("This order can no longer request ship approval"), {
+      statusCode: 400,
+    });
   }
 
   if (!order.isUrgent) {
@@ -628,9 +984,13 @@ exports.shipOrder = async (id, userId = null, { trackingNumber = "", carrierId =
   }
 
   for (const line of order.lines) {
+    const quantityToShip = Math.min(Number(line.quantity || 0), Number(line.allocatedQuantity || 0));
+    if (quantityToShip <= 0) continue;
+
     await stockMovementService.deductReservedStock({
       productId: line.productId,
-      quantity: line.quantity,
+      quantity: quantityToShip,
+      depotId: line.depotId || null,
       sourceModule: "COMMERCIAL",
       sourceType: "SALES_ORDER_SHIPPED",
       sourceId: String(order._id),
@@ -689,8 +1049,19 @@ exports.closeOrder = async (id) => {
     throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
   }
 
-  if (order.status !== "DELIVERED") {
-    throw Object.assign(new Error("Only delivered orders can be closed"), { statusCode: 400 });
+  if (order.status === "RETURNED") {
+    const openRmas = await RMA.countDocuments({
+      salesOrderId: order._id,
+      status: { $ne: "CLOSED" },
+    });
+    if (openRmas > 0) {
+      throw Object.assign(
+        new Error("Close the related return request before closing this order"),
+        { statusCode: 400 }
+      );
+    }
+  } else if (order.status !== "DELIVERED") {
+    throw Object.assign(new Error("Only delivered or returned orders can be closed"), { statusCode: 400 });
   }
 
   order.status = "CLOSED";
@@ -698,4 +1069,56 @@ exports.closeOrder = async (id) => {
   await order.save();
 
   return exports.getOrderById(order._id);
+};
+
+exports.markReturned = async (id) => {
+  const order = await SalesOrder.findById(id);
+  if (!order) {
+    throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
+  }
+
+  if (order.status !== "DELIVERED") {
+    throw Object.assign(new Error("Only delivered orders can be marked as returned"), { statusCode: 400 });
+  }
+
+  const relatedRmas = await RMA.find({ salesOrderId: order._id }).select("status");
+  if (relatedRmas.length === 0) {
+    throw Object.assign(new Error("Create and close the return request before marking this order as returned"), {
+      statusCode: 400,
+    });
+  }
+
+  if (!relatedRmas.every((rma) => rma.status === "CLOSED")) {
+    throw Object.assign(new Error("Close the related return request before marking this order as returned"), {
+      statusCode: 400,
+    });
+  }
+
+  order.status = "RETURNED";
+  await order.save();
+
+  return exports.getOrderById(order._id);
+};
+
+exports.reorder = async (id, userId = null) => {
+  const order = await SalesOrder.findById(id).populate("lines.productId");
+  if (!order) {
+    throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
+  }
+
+  const lines = order.lines.map((line) => ({
+    productId: String(line.productId?._id || line.productId),
+    quantity: Number(line.quantity || 0),
+    unitPrice: Number(line.unitPrice || 0),
+    discount: Number(line.discount || 0),
+  }));
+
+  return exports.createOrder({
+    customerId: order.customerId ? String(order.customerId) : null,
+    customerName: order.customerName,
+    lines,
+    promisedDate: suggestedPromiseDate(lines),
+    createdBy: userId,
+    source: "MANUAL",
+  });
 };

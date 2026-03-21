@@ -43,6 +43,19 @@ exports.getStockItemByProductId = async (req, reply) => {
   }
 };
 
+exports.getDepotAvailability = async (req, reply) => {
+  try {
+    const productIds = typeof req.query?.productIds === "string" && req.query.productIds.trim()
+      ? req.query.productIds.split(",").map((value) => value.trim()).filter(Boolean)
+      : [];
+    const data = await stockService.getDepotAvailability({ productIds });
+    return success(reply, data);
+  } catch (err) {
+    console.error("Error in getDepotAvailability:", err);
+    return error(reply, err.message, err.statusCode || 500);
+  }
+};
+
 exports.getMovementHistory = async (req, reply) => {
   try {
     const data = await stockMovementService.getMovementHistory(req.params.productId);
