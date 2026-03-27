@@ -13,9 +13,17 @@ exports.create = async ({
   company,
   address,
   city,
-  governorate,
+  continent,
+  country,
+  state,
   notes,
 }) => {
+  const normalizedCountry = String(country || "").trim();
+  const normalizedState = String(state || "").trim();
+  const normalizedContinent =
+    String(continent || "").trim() ||
+    (normalizedCountry ? "Africa" : "");
+
   return Customer.create({
     name,
     email,
@@ -23,7 +31,9 @@ exports.create = async ({
     company,
     address,
     city,
-    governorate,
+    continent: normalizedContinent,
+    country: normalizedCountry,
+    state: normalizedState,
     notes,
   });
 };

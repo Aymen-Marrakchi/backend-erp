@@ -17,7 +17,9 @@ const customerBody = {
     company: { type: "string" },
     address: { type: "string" },
     city: { type: "string" },
-    governorate: { type: "string" },
+    continent: { type: "string" },
+    country: { type: "string" },
+    state: { type: "string" },
     notes: { type: "string" },
   },
 };
