@@ -12,6 +12,7 @@ const customerSchema = new mongoose.Schema(
     country: { type: String, default: "", trim: true },
     state: { type: String, default: "", trim: true },
     notes: { type: String, default: "" },
+    totalOrderAmount: { type: Number, default: 0, min: 0 },
     active: { type: Boolean, default: true },
   },
   { timestamps: true }

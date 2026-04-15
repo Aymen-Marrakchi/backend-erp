@@ -11,6 +11,7 @@ const notificationService = require("./notification.service");
 const RMA = require("../models/rma.model");
 const financeService = require("../../finance/services/finance.service");
 const customerInvoiceService = require("./customer-invoice.service");
+const customerService = require("./customer.service");
 
 function addDays(date, days) {
   const next = new Date(date);
@@ -568,6 +569,10 @@ exports.createOrder = async ({
     createdBy,
   });
 
+  if (order.customerId) {
+    await customerService.syncCustomerTotalOrderAmount(order.customerId);
+  }
+
   return exports.getOrderById(order._id);
 };
 
@@ -822,6 +827,9 @@ exports.cancelOrder = async (id, userId = null) => {
 
   order.status = "CANCELLED";
   await order.save();
+  if (order.customerId) {
+    await customerService.syncCustomerTotalOrderAmount(order.customerId);
+  }
 
   return exports.getOrderById(order._id);
 };
@@ -1096,6 +1104,9 @@ exports.markReturned = async (id) => {
 
   order.status = "RETURNED";
   await order.save();
+  if (order.customerId) {
+    await customerService.syncCustomerTotalOrderAmount(order.customerId);
+  }
 
   return exports.getOrderById(order._id);
 };
