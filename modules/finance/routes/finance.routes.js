@@ -13,6 +13,27 @@ async function financeRoutes(fastify) {
   fastify.get("/accounts", { preHandler: access }, controller.getAccounts);
   fastify.get("/accounts/:code", { preHandler: access }, controller.getAccountLedger);
   fastify.get("/reports", { preHandler: access }, controller.getReports);
+
+  // TEJ
+  fastify.patch("/invoices/:id/tej", { preHandler: access }, controller.updateInvoiceTej);
+
+  // Manual journal entries
+  fastify.get("/manual-entries", { preHandler: access }, controller.getManualEntries);
+  fastify.post("/manual-entries", { preHandler: access }, controller.createManualEntry);
+  fastify.delete("/manual-entries/:id", { preHandler: access }, controller.deleteManualEntry);
+
+  // TVA declaration
+  fastify.get("/tva-declaration", { preHandler: access }, controller.getTvaDeclaration);
+
+  // Retenue à la source
+  fastify.get("/rs", { preHandler: access }, controller.getRsPayments);
+
+  // Calendar
+  fastify.get("/calendar", { preHandler: access }, controller.getCalendar);
+
+  // Company settings
+  fastify.get("/settings", { preHandler: access }, controller.getSettings);
+  fastify.put("/settings", { preHandler: access }, controller.updateSettings);
 }
 
 module.exports = financeRoutes;

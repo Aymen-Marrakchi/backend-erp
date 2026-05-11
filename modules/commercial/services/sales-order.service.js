@@ -9,7 +9,6 @@ const stockService = require("../../stock/services/stock.service");
 const backOrderService = require("./backorder.service");
 const notificationService = require("./notification.service");
 const RMA = require("../models/rma.model");
-const financeService = require("../../finance/services/finance.service");
 const customerInvoiceService = require("./customer-invoice.service");
 const customerService = require("./customer.service");
 
@@ -572,6 +571,7 @@ exports.createOrder = async ({
   if (order.customerId) {
     await customerService.syncCustomerTotalOrderAmount(order.customerId);
   }
+  await customerInvoiceService.createOrRefreshFromOrder(order._id, {}, createdBy);
 
   return exports.getOrderById(order._id);
 };
@@ -648,9 +648,22 @@ exports.confirmOrder = async (id, userId = null) => {
     throw Object.assign(new Error("Only draft orders can be confirmed"), { statusCode: 400 });
   }
 
+  const quotation = await customerInvoiceService.getInvoiceByOrderId(id);
+  if (!quotation) {
+    throw Object.assign(
+      new Error("A devis must exist before confirming the order"),
+      { statusCode: 400 }
+    );
+  }
+  if (quotation.quotationStatus !== "ACCEPTED") {
+    throw Object.assign(
+      new Error("The devis must be accepted by the client before the order can be confirmed"),
+      { statusCode: 400 }
+    );
+  }
+
   order.status = "CONFIRMED";
   await order.save();
-  await customerInvoiceService.createOrRefreshFromOrder(order._id, {}, userId);
 
   return exports.getOrderById(order._id);
 };
@@ -1024,7 +1037,6 @@ exports.shipOrder = async (id, userId = null, { trackingNumber = "", carrierId =
   if (shipmentAddress) order.shipmentAddress = shipmentAddress.trim();
   order.shippingCost = shippingCost || 0;
   await order.save();
-  await financeService.recordSalesOrderShipped(order);
   await notificationService.createForShipment(order, userId);
 
   return exports.getOrderById(order._id);
@@ -1045,7 +1057,6 @@ exports.deliverOrder = async (id, userId = null) => {
   order.status = "DELIVERED";
   order.deliveredAt = new Date();
   await order.save();
-  await financeService.recordSalesOrderDelivered(order);
   await notificationService.createForDelivery(order, userId);
 
   return exports.getOrderById(order._id);

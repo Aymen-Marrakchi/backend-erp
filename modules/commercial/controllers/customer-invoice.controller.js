@@ -28,6 +28,24 @@ exports.getInvoiceByOrderId = async (req, reply) => {
   }
 };
 
+exports.cancelQuotation = async (req, reply) => {
+  try {
+    return reply.code(200).send(
+      await customerInvoiceService.cancelQuotation(req.params.id, req.body || {})
+    );
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.deleteInvoice = async (req, reply) => {
+  try {
+    return reply.code(200).send(await customerInvoiceService.deleteInvoice(req.params.id));
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
 exports.createOrRefreshFromOrder = async (req, reply) => {
   try {
     return reply.code(201).send(
@@ -46,6 +64,16 @@ exports.configureInvoice = async (req, reply) => {
   try {
     return reply.code(200).send(
       await customerInvoiceService.configureInvoice(req.params.id, req.body || {})
+    );
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.finalizeInvoice = async (req, reply) => {
+  try {
+    return reply.code(200).send(
+      await customerInvoiceService.finalizeInvoice(req.params.id, req.user?.id || null, req.body || {})
     );
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
@@ -86,6 +114,36 @@ exports.sendReminder = async (req, reply) => {
   try {
     return reply.code(200).send(
       await customerInvoiceService.sendReminder(req.params.id, req.user?.id || null, req.body || {})
+    );
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.markAsSent = async (req, reply) => {
+  try {
+    return reply.code(200).send(
+      await customerInvoiceService.markAsSent(req.params.id, req.user?.id || null)
+    );
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.acceptQuotation = async (req, reply) => {
+  try {
+    return reply.code(200).send(
+      await customerInvoiceService.acceptQuotation(req.params.id)
+    );
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.rejectQuotation = async (req, reply) => {
+  try {
+    return reply.code(200).send(
+      await customerInvoiceService.rejectQuotation(req.params.id, req.body || {})
     );
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });

@@ -41,6 +41,9 @@ const purchasePaymentSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    rsRate: { type: Number, default: 0, min: 0 },
+    rsAmount: { type: Number, default: 0, min: 0 },
+    rsType: { type: String, default: "", trim: true },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

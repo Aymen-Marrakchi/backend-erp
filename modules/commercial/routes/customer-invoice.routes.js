@@ -8,6 +8,10 @@ const {
   clearChequePaymentBody,
   sendInvoiceBody,
   sendReminderBody,
+  cancelQuotationBody,
+  markSentBody,
+  acceptQuotationBody,
+  rejectQuotationBody,
 } = require("../schemas/customer-invoice.schema");
 
 async function customerInvoiceRoutes(fastify) {
@@ -17,6 +21,12 @@ async function customerInvoiceRoutes(fastify) {
 
   fastify.get("/", { preHandler: readAccess }, controller.getAllInvoices);
   fastify.get("/:id", { preHandler: readAccess, schema: { params: idParam } }, controller.getInvoiceById);
+  fastify.delete("/:id", { preHandler: financeWrite, schema: { params: idParam } }, controller.deleteInvoice);
+  fastify.post(
+    "/:id/cancel",
+    { preHandler: financeWrite, schema: { params: idParam, body: cancelQuotationBody } },
+    controller.cancelQuotation
+  );
   fastify.get(
     "/by-order/:orderId",
     { preHandler: readAccess, schema: { params: orderIdParam } },
@@ -34,8 +44,13 @@ async function customerInvoiceRoutes(fastify) {
   );
   fastify.patch(
     "/:id/configure",
-    { preHandler: commercialWrite, schema: { params: idParam, body: invoiceConfigBody } },
+    { preHandler: financeWrite, schema: { params: idParam, body: invoiceConfigBody } },
     controller.configureInvoice
+  );
+  fastify.post(
+    "/:id/finalize",
+    { preHandler: financeWrite, schema: { params: idParam, body: invoiceConfigBody } },
+    controller.finalizeInvoice
   );
   fastify.post(
     "/:id/payments",
@@ -51,6 +66,21 @@ async function customerInvoiceRoutes(fastify) {
     "/:id/clear-cheque",
     { preHandler: financeWrite, schema: { params: idParam, body: clearChequePaymentBody } },
     controller.clearChequePayment
+  );
+  fastify.post(
+    "/:id/mark-sent",
+    { preHandler: financeWrite, schema: { params: idParam, body: markSentBody } },
+    controller.markAsSent
+  );
+  fastify.post(
+    "/:id/accept",
+    { preHandler: financeWrite, schema: { params: idParam, body: acceptQuotationBody } },
+    controller.acceptQuotation
+  );
+  fastify.post(
+    "/:id/reject",
+    { preHandler: financeWrite, schema: { params: idParam, body: rejectQuotationBody } },
+    controller.rejectQuotation
   );
 }
 

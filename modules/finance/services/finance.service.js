@@ -1,22 +1,12 @@
 const FinanceEntry = require("../models/finance-entry.model");
+const ManualJournalEntry = require("../models/manual-journal-entry.model");
+const CompanySettings = require("../models/company-settings.model");
 const PurchaseInvoice = require("../../purchase/models/purchase-invoice.model");
 const PurchasePayment = require("../../purchase/models/purchase-payment.model");
-const SalesOrder = require("../../commercial/models/sales-order.model");
 const CustomerInvoice = require("../../commercial/models/customer-invoice.model");
 
 function roundAmount(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 1000) / 1000;
-}
-
-function calcOrderAmount(order) {
-  const linesTotal = (order.lines || []).reduce((sum, line) => {
-    const quantity = Number(line.quantity || 0);
-    const unitPrice = Number(line.unitPrice || 0);
-    const discountRate = Math.max(0, Math.min(100, Number(line.discount || 0)));
-    return sum + quantity * unitPrice * (1 - discountRate / 100);
-  }, 0);
-
-  return roundAmount(linesTotal + Number(order.shippingCost || 0));
 }
 
 async function upsertEntry(sourceType, sourceId, payload) {
@@ -34,52 +24,73 @@ async function upsertEntry(sourceType, sourceId, payload) {
 }
 
 function paymentAccountForMethod(method = "") {
-  if (method === "ESPECE") {
-    return { code: "531", label: "Cash" };
-  }
-  return { code: "512", label: "Bank" };
+  if (method === "ESPECE") return { code: "531", label: "Caisse" };
+  return { code: "512", label: "Banque" };
 }
 
 function getAccountingLines(entry) {
   const amount = roundAmount(Number(entry.amount || 0));
   const method = entry.metadata?.method || entry.metadata?.paymentMethod || "";
   const cashAccount = paymentAccountForMethod(method);
+  const htAmount = roundAmount(Number(entry.metadata?.subtotalHt ?? amount));
+
+  const hasSeparatedTax = entry.metadata?.totalVat != null;
+  const tvaAmount = hasSeparatedTax ? roundAmount(Number(entry.metadata.totalVat || 0)) : 0;
+  const fodecAmount = hasSeparatedTax ? roundAmount(Number(entry.metadata.totalFodec || 0)) : 0;
+  const timbreAmount = hasSeparatedTax ? roundAmount(Number(entry.metadata.timbreFiscal || 0)) : 0;
+  const legacyTaxAmount = hasSeparatedTax ? 0 : roundAmount(Math.max(0, amount - htAmount));
 
   switch (entry.entryType) {
-    case "PAYABLE_RECORDED":
-      return [
-        { accountCode: "607", accountName: "Purchases Expense", side: "DEBIT", amount },
-        { accountCode: "401", accountName: "Supplier Payables", side: "CREDIT", amount },
+    case "INVOICE_ISSUED": {
+      const lines = [
+        { accountCode: "411", accountName: "Clients", side: "DEBIT", amount },
+        { accountCode: "706", accountName: "Ventes de marchandises", side: "CREDIT", amount: htAmount },
       ];
-    case "PAYABLE_PAYMENT":
-      return [
-        { accountCode: "401", accountName: "Supplier Payables", side: "DEBIT", amount },
-        { accountCode: cashAccount.code, accountName: cashAccount.label, side: "CREDIT", amount },
-      ];
-    case "PAYABLE_CREDIT":
-      return [
-        { accountCode: "401", accountName: "Supplier Payables", side: "DEBIT", amount },
-        { accountCode: "609", accountName: "Purchase Credit Notes", side: "CREDIT", amount },
-      ];
-    case "RECEIVABLE_RECORDED":
-      return [
-        { accountCode: "411", accountName: "Customer Receivables", side: "DEBIT", amount },
-        { accountCode: "419", accountName: "Pending Legalization", side: "CREDIT", amount },
-      ];
-    case "RECEIVABLE_PAYMENT":
+      if (hasSeparatedTax) {
+        if (tvaAmount > 0) lines.push({ accountCode: "4457", accountName: "TVA collectée", side: "CREDIT", amount: tvaAmount });
+        if (fodecAmount > 0) lines.push({ accountCode: "44581", accountName: "FODEC collecté", side: "CREDIT", amount: fodecAmount });
+        if (timbreAmount > 0) lines.push({ accountCode: "4371", accountName: "Timbre fiscal à décaisser", side: "CREDIT", amount: timbreAmount });
+      } else if (legacyTaxAmount > 0) {
+        lines.push({ accountCode: "4457", accountName: "TVA collectée", side: "CREDIT", amount: legacyTaxAmount });
+      }
+      return lines;
+    }
+    case "REGLEMENT_RECU":
       return [
         { accountCode: cashAccount.code, accountName: cashAccount.label, side: "DEBIT", amount },
-        { accountCode: "411", accountName: "Customer Receivables", side: "CREDIT", amount },
+        { accountCode: "411", accountName: "Clients", side: "CREDIT", amount },
       ];
-    case "INVOICE_LEGALIZED":
-      return [
-        { accountCode: "419", accountName: "Pending Legalization", side: "DEBIT", amount },
-        { accountCode: "706", accountName: "Sales Revenue", side: "CREDIT", amount },
+    case "PAYABLE_RECORDED": {
+      const lines = [
+        { accountCode: "607", accountName: "Achats de marchandises", side: "DEBIT", amount: htAmount },
       ];
-    case "REVENUE_RECOGNIZED":
+      if (hasSeparatedTax) {
+        if (tvaAmount > 0) lines.push({ accountCode: "4456", accountName: "TVA déductible", side: "DEBIT", amount: tvaAmount });
+        // FODEC on purchases is NOT recoverable in Tunisia — it is a cost (charge), not a tax credit
+        if (fodecAmount > 0) lines.push({ accountCode: "60800", accountName: "FODEC sur achats", side: "DEBIT", amount: fodecAmount });
+        if (timbreAmount > 0) lines.push({ accountCode: "6371", accountName: "Timbre fiscal", side: "DEBIT", amount: timbreAmount });
+      } else if (legacyTaxAmount > 0) {
+        lines.push({ accountCode: "4456", accountName: "TVA déductible", side: "DEBIT", amount: legacyTaxAmount });
+      }
+      lines.push({ accountCode: "401", accountName: "Fournisseurs", side: "CREDIT", amount });
+      return lines;
+    }
+    case "PAYABLE_PAYMENT": {
+      const rsAmount = roundAmount(Number(entry.metadata?.rsAmount || 0));
+      const cashOut = roundAmount(amount - rsAmount);
+      const lines = [
+        { accountCode: "401", accountName: "Fournisseurs", side: "DEBIT", amount },
+        { accountCode: cashAccount.code, accountName: cashAccount.label, side: "CREDIT", amount: rsAmount > 0 ? cashOut : amount },
+      ];
+      if (rsAmount > 0) {
+        lines.push({ accountCode: "4028", accountName: "Retenues à la source à décaisser", side: "CREDIT", amount: rsAmount });
+      }
+      return lines;
+    }
+    case "PAYABLE_CREDIT":
       return [
-        { accountCode: "418", accountName: "Delivery Clearing", side: "DEBIT", amount },
-        { accountCode: "706", accountName: "Sales Revenue", side: "CREDIT", amount },
+        { accountCode: "401", accountName: "Fournisseurs", side: "DEBIT", amount },
+        { accountCode: "609", accountName: "Avoirs fournisseurs", side: "CREDIT", amount },
       ];
     default:
       return [];
@@ -99,6 +110,27 @@ function toJournalEntry(entry) {
     notes: entry.notes,
     currency: entry.currency,
     lines: getAccountingLines(entry),
+  };
+}
+
+function toManualJournalEntry(entry) {
+  return {
+    _id: String(entry._id),
+    sourceType: "MANUAL",
+    sourceId: String(entry._id),
+    reference: entry.reference,
+    entryType: "MANUAL_ENTRY",
+    sourceModule: "FINANCE",
+    counterpartyName: "",
+    occurredAt: entry.occurredAt,
+    notes: entry.description || "",
+    currency: "TND",
+    lines: (entry.lines || []).map((l) => ({
+      accountCode: l.accountCode,
+      accountName: l.accountName,
+      side: l.side,
+      amount: roundAmount(Number(l.amount || 0)),
+    })),
   };
 }
 
@@ -142,10 +174,81 @@ function buildAccountSummaries(journalEntries = []) {
   );
 }
 
+// ─── Recording Functions ──────────────────────────────────────────────────────
+
+exports.recordInvoiceIssued = async (invoice) => {
+  const totalTtc = roundAmount(Number(invoice.totalTtc || 0));
+  const subtotalHt = roundAmount(Number(invoice.subtotalHt || 0));
+  const totalVat = roundAmount(Number(invoice.totalVat || 0));
+  const totalFodec = roundAmount(Number(invoice.totalFodec || 0));
+  const timbreFiscal = roundAmount(Number(invoice.timbreFiscal || 0));
+
+  return upsertEntry("CUSTOMER_INVOICE_FINALIZED", invoice._id, {
+    entryType: "INVOICE_ISSUED",
+    direction: "INFLOW",
+    sourceModule: "COMMERCIAL",
+    reference: invoice.invoiceNo,
+    counterpartyType: "CUSTOMER",
+    counterpartyId: String(invoice.customerId || ""),
+    counterpartyName: invoice.customerName || "",
+    amount: totalTtc,
+    status: "OPEN",
+    occurredAt: invoice.finalizedAt || invoice.issueDate || new Date(),
+    notes: `Facture ${invoice.invoiceNo} émise`,
+    metadata: {
+      subtotalHt,
+      totalVat,
+      totalFodec,
+      timbreFiscal,
+      salesOrderId: String(invoice.salesOrderId || ""),
+    },
+  });
+};
+
+exports.recordReglement = async ({ invoice, payment }) => {
+  if (!payment || payment.status !== "CLEARED") return null;
+
+  await upsertEntry("CUSTOMER_REGLEMENT", payment._id, {
+    entryType: "REGLEMENT_RECU",
+    direction: "INFLOW",
+    sourceModule: "COMMERCIAL",
+    reference: payment.reference || invoice.invoiceNo,
+    counterpartyType: "CUSTOMER",
+    counterpartyId: String(invoice.customerId || ""),
+    counterpartyName: invoice.customerName || "",
+    amount: roundAmount(payment.amount),
+    status: "SETTLED",
+    occurredAt: payment.paidAt || new Date(),
+    notes: `Règlement reçu pour ${invoice.invoiceNo}`,
+    metadata: {
+      customerInvoiceId: String(invoice._id),
+      invoiceNo: invoice.invoiceNo,
+      method: payment.method,
+    },
+  });
+
+  const invoiceEntry = await FinanceEntry.findOne({
+    sourceType: "CUSTOMER_INVOICE_FINALIZED",
+    sourceId: String(invoice._id),
+  });
+  if (invoiceEntry) {
+    const remaining = roundAmount(
+      Number(invoice.totalTtc || 0) - Number(invoice.amountPaid || 0)
+    );
+    invoiceEntry.amount = Math.max(0, remaining);
+    invoiceEntry.status = remaining <= 0 ? "SETTLED" : "OPEN";
+    await invoiceEntry.save();
+  }
+};
+
 exports.recordPurchaseInvoiceApproved = async (invoice) => {
   const outstanding = roundAmount(
     Number(invoice.totalTtc || 0) - Number(invoice.creditNoteAmount || 0)
   );
+  const subtotalHt = roundAmount(Number(invoice.subtotalHt || 0));
+  const totalVat = roundAmount(Number(invoice.totalVat || 0));
+  const totalFodec = roundAmount(Number(invoice.totalFodec || 0));
+  const timbreFiscal = roundAmount(Number(invoice.timbreFiscal || 0));
 
   return upsertEntry("PURCHASE_INVOICE_APPROVED", invoice._id, {
     entryType: "PAYABLE_RECORDED",
@@ -157,8 +260,12 @@ exports.recordPurchaseInvoiceApproved = async (invoice) => {
     amount: Math.max(0, outstanding),
     status: Math.max(0, outstanding) > 0 ? "OPEN" : "SETTLED",
     occurredAt: invoice.approvedAt || new Date(),
-    notes: `Supplier invoice ${invoice.invoiceNo} approved`,
+    notes: `Facture fournisseur ${invoice.invoiceNo} approuvée`,
     metadata: {
+      subtotalHt,
+      totalVat,
+      totalFodec,
+      timbreFiscal,
       purchaseOrderId: String(invoice.purchaseOrderId),
       totalTtc: Number(invoice.totalTtc || 0),
       creditNoteAmount: Number(invoice.creditNoteAmount || 0),
@@ -167,6 +274,8 @@ exports.recordPurchaseInvoiceApproved = async (invoice) => {
 };
 
 exports.recordPurchasePayment = async ({ payment, invoice }) => {
+  const rsAmount = roundAmount(Number(payment.rsAmount || 0));
+
   await upsertEntry("PURCHASE_PAYMENT_CREATED", payment._id, {
     entryType: "PAYABLE_PAYMENT",
     direction: "OUTFLOW",
@@ -177,11 +286,14 @@ exports.recordPurchasePayment = async ({ payment, invoice }) => {
     amount: roundAmount(payment.amount),
     status: "SETTLED",
     occurredAt: payment.paymentDate || new Date(),
-    notes: `Supplier payment ${payment.paymentNo} registered`,
+    notes: `Paiement fournisseur ${payment.paymentNo}`,
     metadata: {
       purchaseInvoiceId: String(payment.purchaseInvoiceId),
       method: payment.method,
       invoiceNo: invoice?.invoiceNo || "",
+      rsAmount,
+      rsRate: Number(payment.rsRate || 0),
+      rsType: payment.rsType || "",
     },
   });
 
@@ -189,7 +301,6 @@ exports.recordPurchasePayment = async ({ payment, invoice }) => {
     sourceType: "PURCHASE_INVOICE_APPROVED",
     sourceId: String(payment.purchaseInvoiceId),
   });
-
   if (payableEntry) {
     const remaining = roundAmount(
       Number(invoice.totalTtc || 0) -
@@ -203,9 +314,7 @@ exports.recordPurchasePayment = async ({ payment, invoice }) => {
 };
 
 exports.recordPurchaseReturnCredit = async ({ purchaseReturn, invoice }) => {
-  if (Number(purchaseReturn.refundAmount || 0) <= 0) {
-    return null;
-  }
+  if (Number(purchaseReturn.refundAmount || 0) <= 0) return null;
 
   await upsertEntry("PURCHASE_RETURN_CREDIT", purchaseReturn._id, {
     entryType: "PAYABLE_CREDIT",
@@ -217,7 +326,7 @@ exports.recordPurchaseReturnCredit = async ({ purchaseReturn, invoice }) => {
     amount: roundAmount(purchaseReturn.refundAmount),
     status: "INFO",
     occurredAt: purchaseReturn.createdAt || new Date(),
-    notes: `Supplier return ${purchaseReturn.returnNo} created a credit note`,
+    notes: `Avoir fournisseur ${purchaseReturn.returnNo}`,
     metadata: {
       purchaseInvoiceId: String(purchaseReturn.purchaseInvoiceId),
       invoiceNo: invoice?.invoiceNo || "",
@@ -229,7 +338,6 @@ exports.recordPurchaseReturnCredit = async ({ purchaseReturn, invoice }) => {
     sourceType: "PURCHASE_INVOICE_APPROVED",
     sourceId: String(purchaseReturn.purchaseInvoiceId),
   });
-
   if (payableEntry) {
     const remaining = roundAmount(
       Number(invoice.totalTtc || 0) -
@@ -242,159 +350,140 @@ exports.recordPurchaseReturnCredit = async ({ purchaseReturn, invoice }) => {
   }
 };
 
-exports.recordSalesOrderShipped = async (order) => {
-  return upsertEntry("SALES_ORDER_SHIPPED", order._id, {
-    entryType: "RECEIVABLE_RECORDED",
-    direction: "INFLOW",
-    sourceModule: "COMMERCIAL",
-    reference: order.orderNo,
-    counterpartyType: "CUSTOMER",
-    counterpartyId: String(order.customerId || ""),
-    counterpartyName: order.customerName || "",
-    amount: calcOrderAmount(order),
-    status: "OPEN",
-    occurredAt: order.shippedAt || new Date(),
-    notes: `Sales order ${order.orderNo} shipped`,
-    metadata: {
-      orderStatus: order.status,
-      trackingNumber: order.trackingNumber || "",
-    },
-  });
+// ─── TEJ ──────────────────────────────────────────────────────────────────────
+
+exports.updateInvoiceTej = async (invoiceId, payload) => {
+  const invoice = await CustomerInvoice.findById(invoiceId);
+  if (!invoice) throw Object.assign(new Error("Facture introuvable"), { statusCode: 404 });
+  if (invoice.documentStage !== "INVOICE")
+    throw Object.assign(new Error("Seules les factures finalisées acceptent une référence TEJ"), { statusCode: 400 });
+
+  const { tejReference, tejStatus, tejQrData } = payload;
+  if (tejReference !== undefined) invoice.tejReference = String(tejReference).trim();
+  if (tejStatus !== undefined) invoice.tejStatus = tejStatus;
+  if (tejQrData !== undefined) invoice.tejQrData = String(tejQrData).trim();
+
+  await invoice.save();
+  return invoice;
 };
 
-exports.recordSalesOrderDelivered = async (order) => {
-  return upsertEntry("SALES_ORDER_DELIVERED", order._id, {
-    entryType: "REVENUE_RECOGNIZED",
-    direction: "INFLOW",
-    sourceModule: "COMMERCIAL",
-    reference: order.orderNo,
-    counterpartyType: "CUSTOMER",
-    counterpartyId: String(order.customerId || ""),
-    counterpartyName: order.customerName || "",
-    amount: calcOrderAmount(order),
-    status: "INFO",
-    occurredAt: order.deliveredAt || new Date(),
-    notes: `Sales order ${order.orderNo} delivered`,
-    metadata: {
-      orderStatus: order.status,
-    },
-  });
-};
+// ─── Manual Journal Entries ───────────────────────────────────────────────────
 
-exports.recordCustomerInvoiceCreated = async (invoice) => {
-  await upsertEntry("CUSTOMER_INVOICE_CREATED", invoice._id, {
-    entryType: "RECEIVABLE_RECORDED",
-    direction: "INFLOW",
-    sourceModule: "COMMERCIAL",
-    reference: invoice.invoiceNo,
-    counterpartyType: "CUSTOMER",
-    counterpartyId: String(invoice.customerId || ""),
-    counterpartyName: invoice.customerName || "",
-    amount: roundAmount(invoice.totalTtc),
-    status: invoice.paymentStatus === "PAYEE" ? "SETTLED" : "OPEN",
-    occurredAt: invoice.issueDate || new Date(),
-    notes: `Customer invoice ${invoice.invoiceNo} issued`,
-    metadata: {
-      salesOrderId: String(invoice.salesOrderId),
-      legalizationStatus: invoice.legalizationStatus,
-      paymentStatus: invoice.paymentStatus,
-      paymentMethod: invoice.paymentMethod,
-    },
+exports.createManualEntry = async (body, userId) => {
+  const { reference, description, occurredAt, lines } = body;
+  if (!reference) throw Object.assign(new Error("Référence obligatoire"), { statusCode: 400 });
+  if (!lines || lines.length < 2)
+    throw Object.assign(new Error("Au moins 2 lignes sont requises"), { statusCode: 400 });
+
+  const totalDebit = roundAmount(
+    lines.filter((l) => l.side === "DEBIT").reduce((sum, l) => sum + Number(l.amount || 0), 0)
+  );
+  const totalCredit = roundAmount(
+    lines.filter((l) => l.side === "CREDIT").reduce((sum, l) => sum + Number(l.amount || 0), 0)
+  );
+
+  if (Math.abs(totalDebit - totalCredit) > 0.001)
+    throw Object.assign(new Error(`Débit (${totalDebit}) ≠ Crédit (${totalCredit})`), { statusCode: 400 });
+
+  const entry = new ManualJournalEntry({
+    reference: String(reference).trim().toUpperCase(),
+    description: String(description || "").trim(),
+    occurredAt: occurredAt ? new Date(occurredAt) : new Date(),
+    lines: lines.map((l) => ({
+      accountCode: String(l.accountCode).trim(),
+      accountName: String(l.accountName).trim(),
+      side: l.side,
+      amount: roundAmount(Number(l.amount)),
+    })),
+    createdBy: userId || null,
   });
 
-  if (invoice.legalizationStatus === "LEGALISEE") {
-    await upsertEntry("CUSTOMER_INVOICE_LEGALIZED", invoice._id, {
-      entryType: "INVOICE_LEGALIZED",
-      direction: "INFLOW",
-      sourceModule: "COMMERCIAL",
-      reference: invoice.invoiceNo,
-      counterpartyType: "CUSTOMER",
-      counterpartyId: String(invoice.customerId || ""),
-      counterpartyName: invoice.customerName || "",
-      amount: roundAmount(invoice.totalTtc),
-      status: "INFO",
-      occurredAt: invoice.legalizedAt || new Date(),
-      notes: `Customer invoice ${invoice.invoiceNo} legalized`,
-      metadata: {
-        salesOrderId: String(invoice.salesOrderId),
-        paymentMethod: invoice.paymentMethod,
-      },
-    });
-  }
+  await entry.save();
+  return entry;
 };
 
-exports.recordCustomerPayment = async ({ invoice, payment }) => {
-  if (!payment || payment.status !== "CLEARED") {
-    return null;
-  }
+exports.getManualEntries = async () =>
+  ManualJournalEntry.find().sort({ occurredAt: -1, createdAt: -1 }).limit(500);
 
-  return upsertEntry("CUSTOMER_PAYMENT_RECORDED", payment._id, {
-    entryType: "RECEIVABLE_PAYMENT",
-    direction: "INFLOW",
-    sourceModule: "COMMERCIAL",
-    reference: payment.reference || invoice.invoiceNo,
-    counterpartyType: "CUSTOMER",
-    counterpartyId: String(invoice.customerId || ""),
-    counterpartyName: invoice.customerName || "",
-    amount: roundAmount(payment.amount),
-    status: "SETTLED",
-    occurredAt: payment.paidAt || new Date(),
-    notes: `Customer payment registered for ${invoice.invoiceNo}`,
-    metadata: {
-      customerInvoiceId: String(invoice._id),
-      invoiceNo: invoice.invoiceNo,
-      method: payment.method,
-      paymentStatus: payment.status,
-    },
-  });
+exports.deleteManualEntry = async (id) => {
+  const entry = await ManualJournalEntry.findById(id);
+  if (!entry) throw Object.assign(new Error("Écriture introuvable"), { statusCode: 404 });
+  await entry.deleteOne();
 };
+
+// ─── RS ───────────────────────────────────────────────────────────────────────
+
+exports.getRsPayments = async () => {
+  const payments = await PurchasePayment.find({ rsAmount: { $gt: 0 } })
+    .populate("supplierId", "supplierNo name")
+    .populate("purchaseInvoiceId", "invoiceNo")
+    .sort({ paymentDate: -1 });
+
+  const totalRs = roundAmount(payments.reduce((sum, p) => sum + Number(p.rsAmount || 0), 0));
+
+  return {
+    payments: payments.map((p) => ({
+      _id: String(p._id),
+      paymentNo: p.paymentNo,
+      supplierName: p.supplierId?.name || "Fournisseur inconnu",
+      supplierNo: p.supplierId?.supplierNo || "",
+      invoiceNo: p.purchaseInvoiceId?.invoiceNo || "",
+      amount: roundAmount(p.amount),
+      rsRate: p.rsRate || 0,
+      rsAmount: roundAmount(p.rsAmount || 0),
+      rsType: p.rsType || "",
+      method: p.method,
+      paymentDate: p.paymentDate,
+    })),
+    totalRs,
+  };
+};
+
+// ─── Query Functions ──────────────────────────────────────────────────────────
 
 exports.getDashboard = async () => {
-  const [invoices, payments, customerInvoices, entries] = await Promise.all([
+  const [purchaseInvoices, purchasePayments, customerInvoices, entries] = await Promise.all([
     PurchaseInvoice.find().populate("supplierId", "supplierNo name"),
     PurchasePayment.find().populate("supplierId", "supplierNo name"),
-    CustomerInvoice.find().sort({ createdAt: -1 }),
+    CustomerInvoice.find({ documentStage: "INVOICE" }).sort({ createdAt: -1 }),
     FinanceEntry.find().sort({ occurredAt: -1, createdAt: -1 }).limit(8),
   ]);
 
-  const payableInvoices = invoices.filter((invoice) =>
-    ["APPROVED", "PARTIALLY_PAID", "PAID"].includes(invoice.status)
+  const payableInvoices = purchaseInvoices.filter((inv) =>
+    ["APPROVED", "PARTIALLY_PAID", "PAID"].includes(inv.status)
   );
 
   const totalPayablesOutstanding = roundAmount(
     payableInvoices.reduce(
-      (sum, invoice) =>
+      (sum, inv) =>
         sum +
         Math.max(
           0,
-          Number(invoice.totalTtc || 0) -
-            Number(invoice.creditNoteAmount || 0) -
-            Number(invoice.amountPaid || 0)
+          Number(inv.totalTtc || 0) -
+            Number(inv.creditNoteAmount || 0) -
+            Number(inv.amountPaid || 0)
         ),
       0
     )
   );
   const totalPaidOut = roundAmount(
-    payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+    purchasePayments.reduce((sum, p) => sum + Number(p.amount || 0), 0)
   );
   const totalReceivables = roundAmount(
     customerInvoices.reduce(
-      (sum, invoice) =>
-        sum + Math.max(0, Number(invoice.totalTtc || 0) - Number(invoice.amountPaid || 0)),
+      (sum, inv) => sum + Math.max(0, Number(inv.totalTtc || 0) - Number(inv.amountPaid || 0)),
       0
     )
   );
   const recognizedRevenue = roundAmount(
-    customerInvoices
-      .filter((invoice) => invoice.legalizationStatus === "LEGALISEE")
-      .reduce((sum, invoice) => sum + Number(invoice.totalTtc || 0), 0)
+    customerInvoices.reduce((sum, inv) => sum + Number(inv.totalTtc || 0), 0)
   );
-  const overduePayables = payableInvoices.filter((invoice) => {
+  const overduePayables = payableInvoices.filter((inv) => {
     const outstanding =
-      Number(invoice.totalTtc || 0) -
-      Number(invoice.creditNoteAmount || 0) -
-      Number(invoice.amountPaid || 0);
-    return outstanding > 0 && invoice.dueDate && new Date(invoice.dueDate) < new Date();
+      Number(inv.totalTtc || 0) -
+      Number(inv.creditNoteAmount || 0) -
+      Number(inv.amountPaid || 0);
+    return outstanding > 0 && inv.dueDate && new Date(inv.dueDate) < new Date();
   }).length;
 
   return {
@@ -411,28 +500,31 @@ exports.getDashboard = async () => {
 };
 
 exports.getReceivables = async () => {
-  const invoices = await CustomerInvoice.find()
+  const invoices = await CustomerInvoice.find({ documentStage: "INVOICE" })
     .populate("salesOrderId", "orderNo status shippedAt deliveredAt closedAt promisedDate trackingNumber")
     .sort({ issueDate: -1, createdAt: -1 });
 
   return invoices.map((invoice) => ({
-    _id: String(invoice.salesOrderId?._id || invoice.salesOrderId || invoice._id),
+    _id: String(invoice._id),
     orderNo: invoice.salesOrderId?.orderNo || invoice.invoiceNo,
     customerId: invoice.customerId ? String(invoice.customerId) : "",
     customerName: invoice.customerName,
-    status: invoice.salesOrderId?.status || "SHIPPED",
+    status: invoice.salesOrderId?.status || "INVOICED",
     amount: roundAmount(
       Math.max(0, Number(invoice.totalTtc || 0) - Number(invoice.amountPaid || 0))
     ),
+    totalTtc: roundAmount(Number(invoice.totalTtc || 0)),
+    amountPaid: roundAmount(Number(invoice.amountPaid || 0)),
     promisedDate: invoice.salesOrderId?.promisedDate || invoice.dueDate || null,
     shippedAt: invoice.salesOrderId?.shippedAt || null,
     deliveredAt: invoice.salesOrderId?.deliveredAt || null,
     closedAt: invoice.salesOrderId?.closedAt || null,
     trackingNumber: invoice.salesOrderId?.trackingNumber || "",
     invoiceNo: invoice.invoiceNo,
-    legalizationStatus: invoice.legalizationStatus,
     paymentStatus: invoice.paymentStatus,
     paymentMethod: invoice.paymentMethod,
+    dueDate: invoice.dueDate || null,
+    finalizedAt: invoice.finalizedAt || null,
   }));
 };
 
@@ -442,58 +534,61 @@ exports.getPayables = async () => {
     .sort({ dueDate: 1, createdAt: -1 });
 
   return invoices
-    .filter((invoice) => ["APPROVED", "PARTIALLY_PAID", "PAID"].includes(invoice.status))
-    .map((invoice) => {
+    .filter((inv) => ["APPROVED", "PARTIALLY_PAID", "PAID"].includes(inv.status))
+    .map((inv) => {
       const outstanding = roundAmount(
         Math.max(
           0,
-          Number(invoice.totalTtc || 0) -
-            Number(invoice.creditNoteAmount || 0) -
-            Number(invoice.amountPaid || 0)
+          Number(inv.totalTtc || 0) -
+            Number(inv.creditNoteAmount || 0) -
+            Number(inv.amountPaid || 0)
         )
       );
-
       return {
-        _id: String(invoice._id),
-        invoiceNo: invoice.invoiceNo,
-        supplierId: invoice.supplierId?._id ? String(invoice.supplierId._id) : String(invoice.supplierId || ""),
-        supplierNo: invoice.supplierId?.supplierNo || "",
-        supplierName: invoice.supplierId?.name || "Unknown supplier",
-        status: invoice.status,
-        totalTtc: roundAmount(invoice.totalTtc),
-        amountPaid: roundAmount(invoice.amountPaid || 0),
-        creditNoteAmount: roundAmount(invoice.creditNoteAmount || 0),
+        _id: String(inv._id),
+        invoiceNo: inv.invoiceNo,
+        supplierId: inv.supplierId?._id
+          ? String(inv.supplierId._id)
+          : String(inv.supplierId || ""),
+        supplierNo: inv.supplierId?.supplierNo || "",
+        supplierName: inv.supplierId?.name || "Fournisseur inconnu",
+        status: inv.status,
+        totalTtc: roundAmount(inv.totalTtc),
+        amountPaid: roundAmount(inv.amountPaid || 0),
+        creditNoteAmount: roundAmount(inv.creditNoteAmount || 0),
         outstanding,
-        legalizationStatus: invoice.legalizationStatus || "NON_LEGALISEE",
-        dueDate: invoice.dueDate,
-        invoiceDate: invoice.invoiceDate,
-        matchingStatus: invoice.matchingStatus,
-        isOverdue: outstanding > 0 && invoice.dueDate && new Date(invoice.dueDate) < new Date(),
+        dueDate: inv.dueDate,
+        invoiceDate: inv.invoiceDate,
+        matchingStatus: inv.matchingStatus,
+        isOverdue:
+          outstanding > 0 && inv.dueDate && new Date(inv.dueDate) < new Date(),
       };
     });
 };
 
 exports.getTreasury = async () => {
   const [payments, payables, receivables, entries] = await Promise.all([
-    PurchasePayment.find().sort({ paymentDate: -1 }).populate("supplierId", "supplierNo name"),
+    PurchasePayment.find()
+      .sort({ paymentDate: -1 })
+      .populate("supplierId", "supplierNo name"),
     exports.getPayables(),
     exports.getReceivables(),
     FinanceEntry.find().sort({ occurredAt: -1, createdAt: -1 }).limit(20),
   ]);
 
-  const supplierPayments = payments.map((payment) => ({
-    _id: String(payment._id),
-    reference: payment.paymentNo,
+  const supplierPayments = payments.map((p) => ({
+    _id: String(p._id),
+    reference: p.paymentNo,
     direction: "OUTFLOW",
-    amount: roundAmount(payment.amount),
-    method: payment.method,
-    date: payment.paymentDate,
-    counterparty: payment.supplierId?.name || "Unknown supplier",
+    amount: roundAmount(p.amount),
+    method: p.method,
+    date: p.paymentDate,
+    counterparty: p.supplierId?.name || "Fournisseur inconnu",
   }));
 
   const expectedCustomerInflows = receivables.map((item) => ({
     _id: item._id,
-    reference: item.orderNo,
+    reference: item.invoiceNo,
     direction: "INFLOW",
     amount: item.amount,
     method: "EXPECTED",
@@ -517,8 +612,7 @@ exports.getTreasury = async () => {
             if (!item.dueDate || item.outstanding <= 0) return false;
             const due = new Date(item.dueDate).getTime();
             const now = Date.now();
-            const limit = now + 30 * 24 * 60 * 60 * 1000;
-            return due >= now && due <= limit;
+            return due >= now && due <= now + 30 * 24 * 60 * 60 * 1000;
           })
           .reduce((sum, item) => sum + item.outstanding, 0)
       ),
@@ -530,13 +624,18 @@ exports.getTreasury = async () => {
   };
 };
 
-exports.getEntries = async () => {
-  return FinanceEntry.find().sort({ occurredAt: -1, createdAt: -1 }).limit(100);
-};
+exports.getEntries = async () =>
+  FinanceEntry.find().sort({ occurredAt: -1, createdAt: -1 }).limit(100);
 
 exports.getJournal = async () => {
-  const entries = await FinanceEntry.find().sort({ occurredAt: -1, createdAt: -1 }).limit(500);
-  return entries.map(toJournalEntry);
+  const [autoEntries, manualEntries] = await Promise.all([
+    FinanceEntry.find().sort({ occurredAt: -1, createdAt: -1 }).limit(500),
+    ManualJournalEntry.find().sort({ occurredAt: -1, createdAt: -1 }).limit(500),
+  ]);
+  return [
+    ...autoEntries.map(toJournalEntry),
+    ...manualEntries.map(toManualJournalEntry),
+  ].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
 };
 
 exports.getAccounts = async () => {
@@ -547,15 +646,14 @@ exports.getAccounts = async () => {
 exports.getAccountLedger = async (accountCode) => {
   const accounts = await exports.getAccounts();
   const account = accounts.find((item) => item.accountCode === accountCode);
-  if (!account) {
-    throw Object.assign(new Error("Account not found"), { statusCode: 404 });
-  }
+  if (!account) throw Object.assign(new Error("Compte introuvable"), { statusCode: 404 });
   return account;
 };
 
 exports.getReports = async () => {
   const accounts = await exports.getAccounts();
-  const getBalance = (code) => accounts.find((item) => item.accountCode === code)?.balance || 0;
+  const getBalance = (code) =>
+    accounts.find((item) => item.accountCode === code)?.balance || 0;
 
   const balanceSheet = {
     assets: {
@@ -565,15 +663,21 @@ exports.getReports = async () => {
     },
     liabilities: {
       supplierPayables: roundAmount(Math.max(0, Math.abs(getBalance("401")))),
-      pendingLegalization: roundAmount(Math.max(0, Math.abs(getBalance("419")))),
+      tvaCollectee: roundAmount(Math.max(0, Math.abs(getBalance("4457")))),
+      fodecCollecte: roundAmount(Math.max(0, Math.abs(getBalance("44581")))),
+      timbreADecaisser: roundAmount(Math.max(0, Math.abs(getBalance("4371")))),
+      rsADecaisser: roundAmount(Math.max(0, Math.abs(getBalance("4028")))),
     },
   };
-
   balanceSheet.assets.total = roundAmount(
     balanceSheet.assets.receivables + balanceSheet.assets.cash + balanceSheet.assets.bank
   );
   balanceSheet.liabilities.total = roundAmount(
-    balanceSheet.liabilities.supplierPayables + balanceSheet.liabilities.pendingLegalization
+    balanceSheet.liabilities.supplierPayables +
+      balanceSheet.liabilities.tvaCollectee +
+      balanceSheet.liabilities.fodecCollecte +
+      balanceSheet.liabilities.timbreADecaisser +
+      balanceSheet.liabilities.rsADecaisser
   );
 
   const profitAndLoss = {
@@ -583,19 +687,126 @@ exports.getReports = async () => {
     },
     expenses: {
       purchasesExpense: roundAmount(Math.max(0, getBalance("607"))),
+      fodecAchats: roundAmount(Math.max(0, getBalance("60800"))),
+      timbreFiscal: roundAmount(Math.max(0, getBalance("6371"))),
+    },
+    tax: {
+      tvaCollectee: roundAmount(Math.abs(getBalance("4457"))),
+      tvaDeductible: roundAmount(Math.max(0, getBalance("4456"))),
+      tvaNet: roundAmount(
+        Math.abs(getBalance("4457")) - Math.max(0, getBalance("4456"))
+      ),
+      fodecCollecte: roundAmount(Math.abs(getBalance("44581"))),
+      timbreADecaisser: roundAmount(Math.abs(getBalance("4371"))),
+      rsADecaisser: roundAmount(Math.abs(getBalance("4028"))),
     },
   };
   profitAndLoss.revenue.total = roundAmount(
     profitAndLoss.revenue.salesRevenue + profitAndLoss.revenue.purchaseCredits
   );
-  profitAndLoss.expenses.total = roundAmount(profitAndLoss.expenses.purchasesExpense);
+  profitAndLoss.expenses.total = roundAmount(
+    profitAndLoss.expenses.purchasesExpense +
+      profitAndLoss.expenses.fodecAchats +
+      profitAndLoss.expenses.timbreFiscal
+  );
   profitAndLoss.netResult = roundAmount(
     profitAndLoss.revenue.total - profitAndLoss.expenses.total
   );
 
+  return { balanceSheet, profitAndLoss, accounts };
+};
+
+exports.getTvaDeclaration = async (year, month) => {
+  const start = new Date(Number(year), Number(month) - 1, 1);
+  const end = new Date(Number(year), Number(month), 1);
+  const dateFilter = { occurredAt: { $gte: start, $lt: end } };
+
+  const [autoEntries, manualEntries] = await Promise.all([
+    FinanceEntry.find(dateFilter),
+    ManualJournalEntry.find(dateFilter),
+  ]);
+
+  const journalEntries = [
+    ...autoEntries.map(toJournalEntry),
+    ...manualEntries.map(toManualJournalEntry),
+  ];
+
+  const accounts = buildAccountSummaries(journalEntries);
+  const getBalance = (code) => accounts.find((a) => a.accountCode === code)?.balance || 0;
+
+  const tvaCollectee = roundAmount(Math.abs(getBalance("4457")));
+  const tvaDeductible = roundAmount(Math.max(0, getBalance("4456")));
+
   return {
-    balanceSheet,
-    profitAndLoss,
-    accounts,
+    period: { year: Number(year), month: Number(month) },
+    tvaCollectee,
+    tvaDeductible,
+    tvaNet: roundAmount(tvaCollectee - tvaDeductible),
+    fodecCollecte: roundAmount(Math.abs(getBalance("44581"))),
+    timbreADecaisser: roundAmount(Math.abs(getBalance("4371"))),
+    rsADecaisser: roundAmount(Math.abs(getBalance("4028"))),
+    salesRevenue: roundAmount(Math.abs(getBalance("706"))),
+    purchasesHt: roundAmount(Math.max(0, getBalance("607"))),
   };
+};
+
+// ─── Company Settings ─────────────────────────────────────────────────────────
+
+// ─── Calendar ─────────────────────────────────────────────────────────────────
+
+exports.getCalendar = async (year, month) => {
+  const start = new Date(Number(year), Number(month) - 1, 1);
+  const end = new Date(Number(year), Number(month), 1);
+
+  const entries = await FinanceEntry.find({
+    occurredAt: { $gte: start, $lt: end },
+    entryType: { $in: ["REGLEMENT_RECU", "PAYABLE_PAYMENT"] },
+  });
+
+  const days = {};
+
+  for (const entry of entries) {
+    const d = new Date(entry.occurredAt);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (!days[key]) {
+      days[key] = { inflows: 0, outflows: 0, net: 0, inflowCount: 0, outflowCount: 0 };
+    }
+    if (entry.entryType === "REGLEMENT_RECU") {
+      days[key].inflows = roundAmount(days[key].inflows + Number(entry.amount || 0));
+      days[key].inflowCount++;
+    } else {
+      days[key].outflows = roundAmount(days[key].outflows + Number(entry.amount || 0));
+      days[key].outflowCount++;
+    }
+  }
+
+  for (const key of Object.keys(days)) {
+    days[key].net = roundAmount(days[key].inflows - days[key].outflows);
+  }
+
+  return { year: Number(year), month: Number(month), days };
+};
+
+exports.getCompanySettings = async () => {
+  let settings = await CompanySettings.findOne();
+  if (!settings) {
+    settings = await CompanySettings.create({
+      companyName: "EMM TN",
+      address: "Route de Gabès Km 6, Sfax, Tunisie",
+      phone: "+(216) 98 241 790",
+      email: "info@emmtn.com",
+    });
+  }
+  return settings;
+};
+
+exports.updateCompanySettings = async (payload) => {
+  let settings = await CompanySettings.findOne();
+  if (!settings) settings = new CompanySettings();
+  const fields = ["companyName", "mf", "rne", "address", "phone", "email", "rib", "iban", "bank", "agence"];
+  for (const field of fields) {
+    if (payload[field] !== undefined) settings[field] = String(payload[field]).trim();
+  }
+  await settings.save();
+  return settings;
 };

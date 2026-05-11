@@ -18,10 +18,20 @@ async function generateInvoiceNo() {
   return `FC-${String(count + 1).padStart(4, "0")}`;
 }
 
+async function generateChequeReference() {
+  const result = await CustomerInvoice.aggregate([
+    { $unwind: "$payments" },
+    { $match: { "payments.method": "CHEQUE" } },
+    { $count: "total" },
+  ]);
+  const count = result[0]?.total || 0;
+  return `CHQ-${String(count + 1).padStart(4, "0")}`;
+}
+
 const populateInvoice = (query) =>
   query
     .populate("salesOrderId", "orderNo status promisedDate shippedAt deliveredAt closedAt trackingNumber")
-    .populate("customerId", "name email company")
+    .populate("customerId", "name email company mf address")
     .populate("lines.productId", "name sku")
     .populate("createdBy", "name email role");
 
@@ -56,7 +66,7 @@ function buildLine(line, config) {
   };
 }
 
-function buildInstallments(totalTtc, plan = {}, issueDate = new Date()) {
+function buildInstallments(totalAmount, plan = {}, issueDate = new Date()) {
   const mode = plan.mode || "CUSTOM";
   const startDate = plan.startDate ? new Date(plan.startDate) : new Date(issueDate);
   let amounts = [];
@@ -74,10 +84,10 @@ function buildInstallments(totalTtc, plan = {}, issueDate = new Date()) {
     const intervalMap = { DAYS_30: 30, DAYS_60: 60, DAYS_90: 90 };
     const intervalDays = intervalMap[mode];
     const installmentsCount = Math.max(1, Number(plan.installmentsCount || 1));
-    const baseAmount = roundAmount(Number(totalTtc || 0) / installmentsCount);
+    const baseAmount = roundAmount(Number(totalAmount || 0) / installmentsCount);
     amounts = Array.from({ length: installmentsCount }, (_, index) =>
       index === installmentsCount - 1
-        ? roundAmount(Number(totalTtc || 0) - baseAmount * (installmentsCount - 1))
+        ? roundAmount(Number(totalAmount || 0) - baseAmount * (installmentsCount - 1))
         : baseAmount
     );
     dates = Array.from({ length: installmentsCount }, (_, index) =>
@@ -86,8 +96,8 @@ function buildInstallments(totalTtc, plan = {}, issueDate = new Date()) {
   }
 
   const totalPlanned = roundAmount(amounts.reduce((sum, value) => sum + value, 0));
-  if (roundAmount(totalPlanned) !== roundAmount(totalTtc)) {
-    throw Object.assign(new Error("Kumbil plan amounts must equal invoice total"), {
+  if (roundAmount(totalPlanned) !== roundAmount(totalAmount)) {
+    throw Object.assign(new Error("Kumbil plan amounts must equal the targeted amount"), {
       statusCode: 400,
     });
   }
@@ -99,6 +109,90 @@ function buildInstallments(totalTtc, plan = {}, issueDate = new Date()) {
     paidAt: null,
     status: "PENDING",
   }));
+}
+
+function resolveInstallmentBaseAmount(invoice, plan = {}) {
+  const totalTtc = roundAmount(Number(invoice.totalTtc || 0));
+  if (plan.remainingOnly) {
+    const remaining = roundAmount(totalTtc - Number(invoice.amountPaid || 0));
+    if (remaining <= 0) {
+      throw Object.assign(new Error("No remaining amount is available for a Kumbil plan"), {
+        statusCode: 400,
+      });
+    }
+    return remaining;
+  }
+  return totalTtc;
+}
+
+function derivePaymentMethodFromSplits(splits = []) {
+  const methods = Array.from(
+    new Set(
+      splits
+        .map((split) => String(split.method || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (methods.length === 0) return "UNSET";
+  if (methods.length === 1) return methods[0];
+  return "MIXED";
+}
+
+function normalizeSettlementSplits(totalAmount, splits = []) {
+  if (!Array.isArray(splits) || splits.length === 0) {
+    throw Object.assign(new Error("At least one settlement split is required"), {
+      statusCode: 400,
+    });
+  }
+
+  const normalized = splits.map((split) => ({
+    method: split.method,
+    plannedAmount: roundAmount(Number(split.plannedAmount || 0)),
+    dueDate: split.dueDate ? new Date(split.dueDate) : null,
+    paidAmount: 0,
+    status: "PENDING",
+    notes: split.notes || "",
+  }));
+
+  if (normalized.some((split) => split.plannedAmount <= 0)) {
+    throw Object.assign(new Error("Each settlement split must have a positive amount"), {
+      statusCode: 400,
+    });
+  }
+
+  const totalPlanned = roundAmount(
+    normalized.reduce((sum, split) => sum + Number(split.plannedAmount || 0), 0)
+  );
+  if (totalPlanned !== roundAmount(totalAmount)) {
+    throw Object.assign(
+      new Error(`Settlement splits must equal the invoice total (${roundAmount(totalAmount)})`),
+      { statusCode: 400 }
+    );
+  }
+
+  return normalized;
+}
+
+function refreshSettlementSplitStatuses(invoice) {
+  if (!Array.isArray(invoice.settlementSplits) || invoice.settlementSplits.length === 0) return;
+
+  invoice.settlementSplits = invoice.settlementSplits.map((split) => {
+    const plannedAmount = roundAmount(Number(split.plannedAmount || 0));
+    const paidAmount = roundAmount(Number(split.paidAmount || 0));
+    let status = "PENDING";
+    if (paidAmount >= plannedAmount && plannedAmount > 0) {
+      status = "PAID";
+    } else if (paidAmount > 0) {
+      status = "PARTIAL";
+    }
+    return {
+      ...split.toObject?.() || split,
+      plannedAmount,
+      paidAmount,
+      status,
+    };
+  });
 }
 
 function buildTaxDefaults(settings) {
@@ -161,26 +255,119 @@ function updateInvoicePaymentState(invoice) {
 
   if (hasPendingCheque) {
     invoice.paymentStatus = "PENDING_CHEQUE";
-    invoice.legalizationStatus = "NON_LEGALISEE";
     return;
   }
 
   if (amountPaid >= totalTtc) {
     invoice.paymentStatus = "PAYEE";
-    invoice.legalizationStatus = "LEGALISEE";
     invoice.paidAt = invoice.paidAt || new Date();
-    invoice.legalizedAt = invoice.legalizedAt || new Date();
     return;
   }
 
   invoice.paymentStatus = amountPaid > 0 ? "PARTIELLEMENT_PAYEE" : "NON_PAYEE";
-  invoice.legalizationStatus = "NON_LEGALISEE";
 }
 
 exports.getAllInvoices = async () => populateInvoice(CustomerInvoice.find()).sort({ createdAt: -1 });
 exports.getInvoiceById = async (id) => populateInvoice(CustomerInvoice.findById(id));
 exports.getInvoiceByOrderId = async (orderId) =>
   populateInvoice(CustomerInvoice.findOne({ salesOrderId: orderId }));
+
+exports.cancelQuotation = async (id, payload = {}) => {
+  const invoice = await CustomerInvoice.findById(id);
+  if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
+  if (invoice.documentStage !== "QUOTATION") {
+    throw Object.assign(new Error("Only quotations can be cancelled"), { statusCode: 400 });
+  }
+  if (invoice.quotationStatus === "CANCELLED") {
+    throw Object.assign(new Error("Quotation is already cancelled"), { statusCode: 400 });
+  }
+  if (invoice.quotationStatus === "ACCEPTED") {
+    throw Object.assign(
+      new Error("An accepted quotation cannot be cancelled. Cancel the sales order first."),
+      { statusCode: 400 }
+    );
+  }
+
+  invoice.quotationStatus = "CANCELLED";
+  if (payload.note) {
+    invoice.notes = [invoice.notes, payload.note].filter(Boolean).join("\n");
+  }
+  await invoice.save();
+  return exports.getInvoiceById(invoice._id);
+};
+
+exports.markAsSent = async (id, userId = null) => {
+  const invoice = await CustomerInvoice.findById(id);
+  if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
+  if (invoice.documentStage !== "QUOTATION") {
+    throw Object.assign(new Error("Only quotations can be marked as sent"), { statusCode: 400 });
+  }
+  if (!["PENDING", "REJECTED"].includes(invoice.quotationStatus)) {
+    throw Object.assign(
+      new Error("Only pending or rejected quotations can be marked as sent"),
+      { statusCode: 400 }
+    );
+  }
+
+  invoice.quotationStatus = "SENT";
+  invoice.sentAt = new Date();
+  invoice.sentBy = userId;
+  await invoice.save();
+  return exports.getInvoiceById(invoice._id);
+};
+
+exports.acceptQuotation = async (id) => {
+  const invoice = await CustomerInvoice.findById(id);
+  if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
+  if (invoice.documentStage !== "QUOTATION") {
+    throw Object.assign(new Error("Only quotations can be accepted"), { statusCode: 400 });
+  }
+  if (!["PENDING", "SENT"].includes(invoice.quotationStatus)) {
+    throw Object.assign(
+      new Error("Only pending or sent quotations can be accepted"),
+      { statusCode: 400 }
+    );
+  }
+
+  invoice.quotationStatus = "ACCEPTED";
+  invoice.acceptedAt = new Date();
+  await invoice.save();
+  return exports.getInvoiceById(invoice._id);
+};
+
+exports.rejectQuotation = async (id, payload = {}) => {
+  const invoice = await CustomerInvoice.findById(id);
+  if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
+  if (invoice.documentStage !== "QUOTATION") {
+    throw Object.assign(new Error("Only quotations can be rejected"), { statusCode: 400 });
+  }
+  if (!["PENDING", "SENT"].includes(invoice.quotationStatus)) {
+    throw Object.assign(
+      new Error("Only pending or sent quotations can be rejected"),
+      { statusCode: 400 }
+    );
+  }
+
+  invoice.quotationStatus = "REJECTED";
+  invoice.rejectedAt = new Date();
+  if (payload.note) {
+    invoice.notes = [invoice.notes, payload.note].filter(Boolean).join("\n");
+  }
+  await invoice.save();
+  return exports.getInvoiceById(invoice._id);
+};
+
+exports.deleteInvoice = async (id) => {
+  const invoice = await CustomerInvoice.findById(id);
+  if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
+  if (invoice.documentStage !== "QUOTATION") {
+    throw Object.assign(new Error("Only quotations can be deleted from the quotations page"), {
+      statusCode: 400,
+    });
+  }
+  await CustomerInvoice.findByIdAndDelete(id);
+  return { success: true };
+};
 
 exports.createOrRefreshFromOrder = async (orderId, payload = {}, userId = null) => {
   const order = await SalesOrder.findById(orderId).populate("lines.productId customerId");
@@ -189,21 +376,29 @@ exports.createOrRefreshFromOrder = async (orderId, payload = {}, userId = null) 
   const taxDefaults = buildTaxDefaults(settings);
 
   let invoice = await CustomerInvoice.findOne({ salesOrderId: orderId });
+  const customer = order.customerId;
   if (!invoice) {
     invoice = new CustomerInvoice({
       invoiceNo: await generateInvoiceNo(),
       salesOrderId: order._id,
-      customerId: order.customerId?._id || order.customerId || null,
+      customerId: customer?._id || order.customerId || null,
       customerName: order.customerName,
+      customerMf: customer?.mf || "",
+      customerAddress: customer?.address || "",
+      invoiceType: payload.invoiceType || "CLIENT",
       issueDate: new Date(),
       dueDate: order.promisedDate || null,
       createdBy: userId,
+      pricingMode: "HT_BASED",
+      quotationStatus: "PENDING",
       paymentMethod: payload.paymentMethod || "UNSET",
       notes: payload.notes || "",
     });
   } else {
-    invoice.customerId = order.customerId?._id || order.customerId || null;
+    invoice.customerId = customer?._id || order.customerId || null;
     invoice.customerName = order.customerName;
+    invoice.customerMf = customer?.mf || invoice.customerMf || "";
+    invoice.customerAddress = customer?.address || invoice.customerAddress || "";
     invoice.dueDate = order.promisedDate || invoice.dueDate;
   }
 
@@ -215,7 +410,7 @@ exports.createOrRefreshFromOrder = async (orderId, payload = {}, userId = null) 
         unitPrice: line.unitPrice || 0,
       },
       {
-        pricingMode: payload.pricingMode || invoice.pricingMode || "HT_BASED",
+        pricingMode: "HT_BASED",
         applyTva:
           typeof payload.applyTva === "boolean" ? payload.applyTva : invoice.applyTva !== false,
         applyFodec:
@@ -225,20 +420,28 @@ exports.createOrRefreshFromOrder = async (orderId, payload = {}, userId = null) 
     )
   );
 
-  recalculateInvoice(invoice, payload, taxDefaults);
+  recalculateInvoice(invoice, { ...payload, pricingMode: "HT_BASED" }, taxDefaults);
 
   if (payload.paymentMethod) invoice.paymentMethod = payload.paymentMethod;
   if (payload.dueDate) invoice.dueDate = new Date(payload.dueDate);
+  if (payload.settlementSplits) {
+    invoice.settlementSplits = normalizeSettlementSplits(invoice.totalTtc, payload.settlementSplits);
+    invoice.paymentMethod = derivePaymentMethodFromSplits(invoice.settlementSplits);
+  }
 
   if (invoice.paymentMethod === "KUMBIL" && payload.installmentPlan) {
-    invoice.installments = buildInstallments(invoice.totalTtc, payload.installmentPlan, invoice.issueDate);
+    invoice.installments = buildInstallments(
+      resolveInstallmentBaseAmount(invoice, payload.installmentPlan),
+      payload.installmentPlan,
+      invoice.issueDate
+    );
   } else if (invoice.paymentMethod !== "KUMBIL") {
     invoice.installments = [];
   }
 
+  refreshSettlementSplitStatuses(invoice);
   updateInvoicePaymentState(invoice);
   await invoice.save();
-  await financeService.recordCustomerInvoiceCreated(invoice);
   return exports.getInvoiceById(invoice._id);
 };
 
@@ -248,17 +451,43 @@ exports.configureInvoice = async (id, payload = {}) => {
   const settings = await purchaseSettingService.getSettings();
   const taxDefaults = buildTaxDefaults(settings);
 
+  if (Array.isArray(payload.lineOverrides) && payload.lineOverrides.length > 0) {
+    for (const override of payload.lineOverrides) {
+      const line = invoice.lines[override.index];
+      if (line && override.unitPrice != null) {
+        line.inputUnitPrice = roundAmount(Number(override.unitPrice));
+        line.baseUnitHt = roundAmount(Number(override.unitPrice));
+      }
+    }
+  }
+
+  if (payload.notes != null) {
+    invoice.notes = payload.notes;
+  }
+
   recalculateInvoice(invoice, payload, taxDefaults);
+
+  if (
+    invoice.documentStage === "QUOTATION" &&
+    ["SENT", "REJECTED"].includes(invoice.quotationStatus)
+  ) {
+    invoice.quotationStatus = "PENDING";
+  }
   if (payload.paymentMethod) invoice.paymentMethod = payload.paymentMethod;
   if (payload.dueDate) invoice.dueDate = new Date(payload.dueDate);
+  if (payload.settlementSplits) {
+    invoice.settlementSplits = normalizeSettlementSplits(invoice.totalTtc, payload.settlementSplits);
+    invoice.paymentMethod = derivePaymentMethodFromSplits(invoice.settlementSplits);
+  }
 
   if (invoice.paymentMethod === "KUMBIL") {
     invoice.installments = buildInstallments(
-      invoice.totalTtc,
+      resolveInstallmentBaseAmount(invoice, payload.installmentPlan || {}),
       payload.installmentPlan || {
         mode: "DAYS_30",
         installmentsCount: invoice.installments?.length || 1,
         startDate: invoice.issueDate || new Date(),
+        remainingOnly: false,
       },
       invoice.issueDate || new Date()
     );
@@ -266,15 +495,55 @@ exports.configureInvoice = async (id, payload = {}) => {
     invoice.installments = [];
   }
 
+  refreshSettlementSplitStatuses(invoice);
   updateInvoicePaymentState(invoice);
   await invoice.save();
-  await financeService.recordCustomerInvoiceCreated(invoice);
+  return exports.getInvoiceById(invoice._id);
+};
+
+exports.finalizeInvoice = async (id, userId = null, payload = {}) => {
+  const invoice = await CustomerInvoice.findById(id);
+  if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
+  if (invoice.quotationStatus === "CANCELLED") {
+    throw Object.assign(new Error("Cancelled quotations cannot move to invoice stage"), {
+      statusCode: 400,
+    });
+  }
+  const settings = await purchaseSettingService.getSettings();
+  const taxDefaults = buildTaxDefaults(settings);
+
+  recalculateInvoice(invoice, payload, taxDefaults);
+  if (payload.dueDate) invoice.dueDate = new Date(payload.dueDate);
+  if (payload.paymentMethod) invoice.paymentMethod = payload.paymentMethod;
+  if (payload.settlementSplits) {
+    invoice.settlementSplits = normalizeSettlementSplits(invoice.totalTtc, payload.settlementSplits);
+    invoice.paymentMethod = derivePaymentMethodFromSplits(invoice.settlementSplits);
+  }
+
+  if (payload.invoiceType && ["CLIENT", "SUPPLIER"].includes(payload.invoiceType)) {
+    invoice.invoiceType = payload.invoiceType;
+  }
+  invoice.documentStage = "INVOICE";
+  invoice.finalizedAt = invoice.finalizedAt || new Date();
+  if (payload.note) {
+    invoice.notes = [invoice.notes, payload.note].filter(Boolean).join("\n");
+  }
+
+  refreshSettlementSplitStatuses(invoice);
+  updateInvoicePaymentState(invoice);
+  await invoice.save();
+  await financeService.recordInvoiceIssued(invoice);
   return exports.getInvoiceById(invoice._id);
 };
 
 exports.registerPayment = async (id, payload = {}) => {
   const invoice = await CustomerInvoice.findById(id);
   if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
+  if (invoice.documentStage !== "INVOICE") {
+    throw Object.assign(new Error("Finalize the quotation as an invoice before registering payment"), {
+      statusCode: 400,
+    });
+  }
 
   const method = payload.method || invoice.paymentMethod;
   if (!method || method === "UNSET") {
@@ -290,6 +559,23 @@ exports.registerPayment = async (id, payload = {}) => {
   }
 
   const paidAt = payload.paidAt ? new Date(payload.paidAt) : new Date();
+  const splitIndex = payload.splitIndex != null ? Number(payload.splitIndex) : null;
+  const selectedSplit =
+    splitIndex != null && Array.isArray(invoice.settlementSplits)
+      ? invoice.settlementSplits[splitIndex]
+      : null;
+
+  if (selectedSplit) {
+    const splitRemaining = roundAmount(
+      Number(selectedSplit.plannedAmount || 0) - Number(selectedSplit.paidAmount || 0)
+    );
+    if (amount > splitRemaining) {
+      throw Object.assign(
+        new Error(`Split payment must be between 0 and ${splitRemaining}`),
+        { statusCode: 400 }
+      );
+    }
+  }
 
   if (method === "CHEQUE") {
     invoice.payments.push({
@@ -298,10 +584,13 @@ exports.registerPayment = async (id, payload = {}) => {
       paidAt,
       status: "PENDING",
       dueDate: addDays(paidAt, 8),
-      reference: payload.reference || "",
+      reference: payload.reference || (await generateChequeReference()),
       notes: payload.notes || "",
+      settlementSplitIndex: splitIndex,
     });
-    invoice.paymentMethod = method;
+    if (!invoice.paymentMethod || invoice.paymentMethod === "UNSET") {
+      invoice.paymentMethod = method;
+    }
     updateInvoicePaymentState(invoice);
     await invoice.save();
     return exports.getInvoiceById(invoice._id);
@@ -342,6 +631,7 @@ exports.registerPayment = async (id, payload = {}) => {
       installmentIndex,
       reference: payload.reference || "",
       notes: payload.notes || "",
+      settlementSplitIndex: splitIndex,
     });
   } else {
     invoice.payments.push({
@@ -351,23 +641,34 @@ exports.registerPayment = async (id, payload = {}) => {
       status: "CLEARED",
       reference: payload.reference || "",
       notes: payload.notes || "",
+      settlementSplitIndex: splitIndex,
     });
   }
 
-  invoice.paymentMethod = method;
+  if (!invoice.paymentMethod || invoice.paymentMethod === "UNSET") {
+    invoice.paymentMethod = method;
+  }
   invoice.amountPaid = roundAmount(Number(invoice.amountPaid || 0) + amount);
+  if (selectedSplit) {
+    selectedSplit.paidAmount = roundAmount(Number(selectedSplit.paidAmount || 0) + amount);
+  }
   if (invoice.amountPaid >= invoice.totalTtc) invoice.paidAt = paidAt;
+  refreshSettlementSplitStatuses(invoice);
   updateInvoicePaymentState(invoice);
   await invoice.save();
-  await financeService.recordCustomerInvoiceCreated(invoice);
   const payment = invoice.payments[invoice.payments.length - 1];
-  await financeService.recordCustomerPayment({ invoice, payment });
+  await financeService.recordReglement({ invoice, payment });
   return exports.getInvoiceById(invoice._id);
 };
 
 exports.clearChequePayment = async (id, paymentId) => {
   const invoice = await CustomerInvoice.findById(id);
   if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
+  if (invoice.documentStage !== "INVOICE") {
+    throw Object.assign(new Error("Only invoices can clear cheque payments"), {
+      statusCode: 400,
+    });
+  }
 
   const payment = invoice.payments.id(paymentId);
   if (!payment || payment.method !== "CHEQUE") {
@@ -377,18 +678,26 @@ exports.clearChequePayment = async (id, paymentId) => {
     throw Object.assign(new Error("Cheque payment is not pending"), { statusCode: 400 });
   }
   if (payment.dueDate && new Date(payment.dueDate) > new Date()) {
-    throw Object.assign(new Error("Cheque cannot be legalized before the 8-day delay"), {
+    throw Object.assign(new Error("Cheque cannot be cleared before the 8-day delay"), {
       statusCode: 400,
     });
   }
 
   payment.status = "CLEARED";
   invoice.amountPaid = roundAmount(Number(invoice.amountPaid || 0) + Number(payment.amount || 0));
+  if (
+    payment.settlementSplitIndex != null &&
+    Array.isArray(invoice.settlementSplits) &&
+    invoice.settlementSplits[payment.settlementSplitIndex]
+  ) {
+    const split = invoice.settlementSplits[payment.settlementSplitIndex];
+    split.paidAmount = roundAmount(Number(split.paidAmount || 0) + Number(payment.amount || 0));
+  }
   if (invoice.amountPaid >= invoice.totalTtc) invoice.paidAt = new Date();
+  refreshSettlementSplitStatuses(invoice);
   updateInvoicePaymentState(invoice);
   await invoice.save();
-  await financeService.recordCustomerInvoiceCreated(invoice);
-  await financeService.recordCustomerPayment({ invoice, payment });
+  await financeService.recordReglement({ invoice, payment });
   return exports.getInvoiceById(invoice._id);
 };
 
@@ -408,6 +717,11 @@ exports.sendInvoice = async (id, userId = null, payload = {}) => {
 exports.sendReminder = async (id, userId = null, payload = {}) => {
   const invoice = await CustomerInvoice.findById(id);
   if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
+  if (invoice.documentStage !== "INVOICE") {
+    throw Object.assign(new Error("Only invoices can enter the reminder workflow"), {
+      statusCode: 400,
+    });
+  }
   if (!invoice.sentAt) {
     throw Object.assign(new Error("Invoice must be sent before reminders"), { statusCode: 400 });
   }

@@ -71,3 +71,80 @@ exports.getReports = async (req, reply) => {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }
 };
+
+exports.updateInvoiceTej = async (req, reply) => {
+  try {
+    return reply.code(200).send(await financeService.updateInvoiceTej(req.params.id, req.body));
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.createManualEntry = async (req, reply) => {
+  try {
+    return reply.code(201).send(await financeService.createManualEntry(req.body, req.user?._id));
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.getManualEntries = async (req, reply) => {
+  try {
+    return reply.code(200).send(await financeService.getManualEntries());
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.deleteManualEntry = async (req, reply) => {
+  try {
+    await financeService.deleteManualEntry(req.params.id);
+    return reply.code(204).send();
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.getTvaDeclaration = async (req, reply) => {
+  try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    return reply.code(200).send(await financeService.getTvaDeclaration(year, month));
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.getRsPayments = async (req, reply) => {
+  try {
+    return reply.code(200).send(await financeService.getRsPayments());
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.getCalendar = async (req, reply) => {
+  try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    return reply.code(200).send(await financeService.getCalendar(year, month));
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.getSettings = async (req, reply) => {
+  try {
+    return reply.code(200).send(await financeService.getCompanySettings());
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.updateSettings = async (req, reply) => {
+  try {
+    return reply.code(200).send(await financeService.updateCompanySettings(req.body));
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
