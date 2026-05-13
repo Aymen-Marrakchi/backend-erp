@@ -8,10 +8,6 @@ const {
   clearChequePaymentBody,
   sendInvoiceBody,
   sendReminderBody,
-  cancelQuotationBody,
-  markSentBody,
-  acceptQuotationBody,
-  rejectQuotationBody,
 } = require("../schemas/customer-invoice.schema");
 
 async function customerInvoiceRoutes(fastify) {
@@ -20,22 +16,15 @@ async function customerInvoiceRoutes(fastify) {
   const financeWrite = [protect, requireRole("ADMIN", "FINANCE_MANAGER")];
 
   fastify.get("/", { preHandler: readAccess }, controller.getAllInvoices);
-  fastify.get("/:id", { preHandler: readAccess, schema: { params: idParam } }, controller.getInvoiceById);
-  fastify.delete("/:id", { preHandler: financeWrite, schema: { params: idParam } }, controller.deleteInvoice);
-  fastify.post(
-    "/:id/cancel",
-    { preHandler: financeWrite, schema: { params: idParam, body: cancelQuotationBody } },
-    controller.cancelQuotation
+  fastify.get(
+    "/:id",
+    { preHandler: readAccess, schema: { params: idParam } },
+    controller.getInvoiceById
   );
   fastify.get(
     "/by-order/:orderId",
     { preHandler: readAccess, schema: { params: orderIdParam } },
     controller.getInvoiceByOrderId
-  );
-  fastify.post(
-    "/from-order/:orderId",
-    { preHandler: commercialWrite, schema: { params: orderIdParam, body: invoiceConfigBody } },
-    controller.createOrRefreshFromOrder
   );
   fastify.post(
     "/:id/send",
@@ -66,21 +55,6 @@ async function customerInvoiceRoutes(fastify) {
     "/:id/clear-cheque",
     { preHandler: financeWrite, schema: { params: idParam, body: clearChequePaymentBody } },
     controller.clearChequePayment
-  );
-  fastify.post(
-    "/:id/mark-sent",
-    { preHandler: financeWrite, schema: { params: idParam, body: markSentBody } },
-    controller.markAsSent
-  );
-  fastify.post(
-    "/:id/accept",
-    { preHandler: financeWrite, schema: { params: idParam, body: acceptQuotationBody } },
-    controller.acceptQuotation
-  );
-  fastify.post(
-    "/:id/reject",
-    { preHandler: financeWrite, schema: { params: idParam, body: rejectQuotationBody } },
-    controller.rejectQuotation
   );
 }
 

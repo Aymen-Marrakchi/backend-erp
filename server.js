@@ -88,6 +88,9 @@ fastify.register(require("./modules/commercial/routes/customer.routes"), {
 fastify.register(require("./modules/commercial/routes/customer-invoice.routes"), {
   prefix: "/api/commercial/invoices",
 });
+fastify.register(require("./modules/commercial/routes/devis.routes"), {
+  prefix: "/api/commercial/devis",
+});
 fastify.register(require("./modules/commercial/routes/carrier.routes"), {
   prefix: "/api/commercial/carriers",
 });

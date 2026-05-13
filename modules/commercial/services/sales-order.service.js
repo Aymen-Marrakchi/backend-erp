@@ -10,6 +10,7 @@ const backOrderService = require("./backorder.service");
 const notificationService = require("./notification.service");
 const RMA = require("../models/rma.model");
 const customerInvoiceService = require("./customer-invoice.service");
+const devisService = require("./devis.service");
 const customerService = require("./customer.service");
 
 function addDays(date, days) {
@@ -521,6 +522,7 @@ exports.createOrder = async ({
   promisedDate = null,
   createdBy = null,
   source = "MANUAL",
+  pricingMode = "HT_BASED",
 }) => {
   const finalOrderNo = orderNo
     ? `ORD-${String(orderNo).trim().toUpperCase().replace(/^ORD-/, "")}`
@@ -566,12 +568,13 @@ exports.createOrder = async ({
     notes,
     promisedDate: promisedDate ? new Date(promisedDate) : suggestedPromiseDate(resolvedLines),
     createdBy,
+    pricingMode: ["HT_BASED", "TTC_BASED"].includes(pricingMode) ? pricingMode : "HT_BASED",
   });
 
   if (order.customerId) {
     await customerService.syncCustomerTotalOrderAmount(order.customerId);
   }
-  await customerInvoiceService.createOrRefreshFromOrder(order._id, {}, createdBy);
+  await devisService.createFromOrder(order._id, createdBy);
 
   return exports.getOrderById(order._id);
 };
@@ -646,20 +649,6 @@ exports.confirmOrder = async (id, userId = null) => {
 
   if (order.status !== "DRAFT") {
     throw Object.assign(new Error("Only draft orders can be confirmed"), { statusCode: 400 });
-  }
-
-  const quotation = await customerInvoiceService.getInvoiceByOrderId(id);
-  if (!quotation) {
-    throw Object.assign(
-      new Error("A devis must exist before confirming the order"),
-      { statusCode: 400 }
-    );
-  }
-  if (quotation.quotationStatus !== "ACCEPTED") {
-    throw Object.assign(
-      new Error("The devis must be accepted by the client before the order can be confirmed"),
-      { statusCode: 400 }
-    );
   }
 
   order.status = "CONFIRMED";

@@ -132,6 +132,11 @@ const salesOrderSchema = new mongoose.Schema(
     vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle", default: null },
     shippingCost: { type: Number, default: 0, min: 0 },
     shipmentAddress: { type: String, default: "", trim: true },
+    pricingMode: {
+      type: String,
+      enum: ["HT_BASED", "TTC_BASED"],
+      default: "HT_BASED",
+    },
     isUrgent: { type: Boolean, default: false },
     shipApproval: {
       status: {

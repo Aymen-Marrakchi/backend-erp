@@ -1,5 +1,4 @@
 const CustomerInvoice = require("../models/customer-invoice.model");
-const SalesOrder = require("../models/sales-order.model");
 const financeService = require("../../finance/services/finance.service");
 const purchaseSettingService = require("../../purchase/services/purchase-setting.service");
 
@@ -14,8 +13,12 @@ function addDays(date, days) {
 }
 
 async function generateInvoiceNo() {
-  const count = await CustomerInvoice.countDocuments();
-  return `FC-${String(count + 1).padStart(4, "0")}`;
+  const docs = await CustomerInvoice.find({ invoiceNo: /^FC-\d+$/ }).select("invoiceNo").lean();
+  const max = docs.reduce((m, d) => {
+    const n = parseInt((d.invoiceNo || "").replace("FC-", ""), 10);
+    return isNaN(n) ? m : Math.max(m, n);
+  }, 0);
+  return `FC-${String(max + 1).padStart(4, "0")}`;
 }
 
 async function generateChequeReference() {
@@ -267,189 +270,24 @@ function updateInvoicePaymentState(invoice) {
   invoice.paymentStatus = amountPaid > 0 ? "PARTIELLEMENT_PAYEE" : "NON_PAYEE";
 }
 
-exports.getAllInvoices = async () => populateInvoice(CustomerInvoice.find()).sort({ createdAt: -1 });
+exports.getAllInvoices = async () =>
+  populateInvoice(CustomerInvoice.find()).sort({ createdAt: -1 });
+
 exports.getInvoiceById = async (id) => populateInvoice(CustomerInvoice.findById(id));
+
 exports.getInvoiceByOrderId = async (orderId) =>
   populateInvoice(CustomerInvoice.findOne({ salesOrderId: orderId }));
-
-exports.cancelQuotation = async (id, payload = {}) => {
-  const invoice = await CustomerInvoice.findById(id);
-  if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
-  if (invoice.documentStage !== "QUOTATION") {
-    throw Object.assign(new Error("Only quotations can be cancelled"), { statusCode: 400 });
-  }
-  if (invoice.quotationStatus === "CANCELLED") {
-    throw Object.assign(new Error("Quotation is already cancelled"), { statusCode: 400 });
-  }
-  if (invoice.quotationStatus === "ACCEPTED") {
-    throw Object.assign(
-      new Error("An accepted quotation cannot be cancelled. Cancel the sales order first."),
-      { statusCode: 400 }
-    );
-  }
-
-  invoice.quotationStatus = "CANCELLED";
-  if (payload.note) {
-    invoice.notes = [invoice.notes, payload.note].filter(Boolean).join("\n");
-  }
-  await invoice.save();
-  return exports.getInvoiceById(invoice._id);
-};
-
-exports.markAsSent = async (id, userId = null) => {
-  const invoice = await CustomerInvoice.findById(id);
-  if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
-  if (invoice.documentStage !== "QUOTATION") {
-    throw Object.assign(new Error("Only quotations can be marked as sent"), { statusCode: 400 });
-  }
-  if (!["PENDING", "REJECTED"].includes(invoice.quotationStatus)) {
-    throw Object.assign(
-      new Error("Only pending or rejected quotations can be marked as sent"),
-      { statusCode: 400 }
-    );
-  }
-
-  invoice.quotationStatus = "SENT";
-  invoice.sentAt = new Date();
-  invoice.sentBy = userId;
-  await invoice.save();
-  return exports.getInvoiceById(invoice._id);
-};
-
-exports.acceptQuotation = async (id) => {
-  const invoice = await CustomerInvoice.findById(id);
-  if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
-  if (invoice.documentStage !== "QUOTATION") {
-    throw Object.assign(new Error("Only quotations can be accepted"), { statusCode: 400 });
-  }
-  if (!["PENDING", "SENT"].includes(invoice.quotationStatus)) {
-    throw Object.assign(
-      new Error("Only pending or sent quotations can be accepted"),
-      { statusCode: 400 }
-    );
-  }
-
-  invoice.quotationStatus = "ACCEPTED";
-  invoice.acceptedAt = new Date();
-  await invoice.save();
-  return exports.getInvoiceById(invoice._id);
-};
-
-exports.rejectQuotation = async (id, payload = {}) => {
-  const invoice = await CustomerInvoice.findById(id);
-  if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
-  if (invoice.documentStage !== "QUOTATION") {
-    throw Object.assign(new Error("Only quotations can be rejected"), { statusCode: 400 });
-  }
-  if (!["PENDING", "SENT"].includes(invoice.quotationStatus)) {
-    throw Object.assign(
-      new Error("Only pending or sent quotations can be rejected"),
-      { statusCode: 400 }
-    );
-  }
-
-  invoice.quotationStatus = "REJECTED";
-  invoice.rejectedAt = new Date();
-  if (payload.note) {
-    invoice.notes = [invoice.notes, payload.note].filter(Boolean).join("\n");
-  }
-  await invoice.save();
-  return exports.getInvoiceById(invoice._id);
-};
-
-exports.deleteInvoice = async (id) => {
-  const invoice = await CustomerInvoice.findById(id);
-  if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
-  if (invoice.documentStage !== "QUOTATION") {
-    throw Object.assign(new Error("Only quotations can be deleted from the quotations page"), {
-      statusCode: 400,
-    });
-  }
-  await CustomerInvoice.findByIdAndDelete(id);
-  return { success: true };
-};
-
-exports.createOrRefreshFromOrder = async (orderId, payload = {}, userId = null) => {
-  const order = await SalesOrder.findById(orderId).populate("lines.productId customerId");
-  if (!order) throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
-  const settings = await purchaseSettingService.getSettings();
-  const taxDefaults = buildTaxDefaults(settings);
-
-  let invoice = await CustomerInvoice.findOne({ salesOrderId: orderId });
-  const customer = order.customerId;
-  if (!invoice) {
-    invoice = new CustomerInvoice({
-      invoiceNo: await generateInvoiceNo(),
-      salesOrderId: order._id,
-      customerId: customer?._id || order.customerId || null,
-      customerName: order.customerName,
-      customerMf: customer?.mf || "",
-      customerAddress: customer?.address || "",
-      invoiceType: payload.invoiceType || "CLIENT",
-      issueDate: new Date(),
-      dueDate: order.promisedDate || null,
-      createdBy: userId,
-      pricingMode: "HT_BASED",
-      quotationStatus: "PENDING",
-      paymentMethod: payload.paymentMethod || "UNSET",
-      notes: payload.notes || "",
-    });
-  } else {
-    invoice.customerId = customer?._id || order.customerId || null;
-    invoice.customerName = order.customerName;
-    invoice.customerMf = customer?.mf || invoice.customerMf || "";
-    invoice.customerAddress = customer?.address || invoice.customerAddress || "";
-    invoice.dueDate = order.promisedDate || invoice.dueDate;
-  }
-
-  invoice.lines = order.lines.map((line) =>
-    buildLine(
-      {
-        productId: line.productId?._id || line.productId,
-        quantity: line.quantity,
-        unitPrice: line.unitPrice || 0,
-      },
-      {
-        pricingMode: "HT_BASED",
-        applyTva:
-          typeof payload.applyTva === "boolean" ? payload.applyTva : invoice.applyTva !== false,
-        applyFodec:
-          typeof payload.applyFodec === "boolean" ? payload.applyFodec : invoice.applyFodec !== false,
-        ...taxDefaults,
-      }
-    )
-  );
-
-  recalculateInvoice(invoice, { ...payload, pricingMode: "HT_BASED" }, taxDefaults);
-
-  if (payload.paymentMethod) invoice.paymentMethod = payload.paymentMethod;
-  if (payload.dueDate) invoice.dueDate = new Date(payload.dueDate);
-  if (payload.settlementSplits) {
-    invoice.settlementSplits = normalizeSettlementSplits(invoice.totalTtc, payload.settlementSplits);
-    invoice.paymentMethod = derivePaymentMethodFromSplits(invoice.settlementSplits);
-  }
-
-  if (invoice.paymentMethod === "KUMBIL" && payload.installmentPlan) {
-    invoice.installments = buildInstallments(
-      resolveInstallmentBaseAmount(invoice, payload.installmentPlan),
-      payload.installmentPlan,
-      invoice.issueDate
-    );
-  } else if (invoice.paymentMethod !== "KUMBIL") {
-    invoice.installments = [];
-  }
-
-  refreshSettlementSplitStatuses(invoice);
-  updateInvoicePaymentState(invoice);
-  await invoice.save();
-  return exports.getInvoiceById(invoice._id);
-};
 
 exports.configureInvoice = async (id, payload = {}) => {
   const invoice = await CustomerInvoice.findById(id);
   if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
-  const settings = await purchaseSettingService.getSettings();
-  const taxDefaults = buildTaxDefaults(settings);
+
+  const hasLineChanges =
+    (Array.isArray(payload.lineOverrides) && payload.lineOverrides.length > 0) ||
+    payload.pricingMode != null ||
+    typeof payload.applyTva === "boolean" ||
+    typeof payload.applyFodec === "boolean" ||
+    Array.isArray(payload.settlementSplits);
 
   if (Array.isArray(payload.lineOverrides) && payload.lineOverrides.length > 0) {
     for (const override of payload.lineOverrides) {
@@ -465,14 +303,12 @@ exports.configureInvoice = async (id, payload = {}) => {
     invoice.notes = payload.notes;
   }
 
-  recalculateInvoice(invoice, payload, taxDefaults);
-
-  if (
-    invoice.documentStage === "QUOTATION" &&
-    ["SENT", "REJECTED"].includes(invoice.quotationStatus)
-  ) {
-    invoice.quotationStatus = "PENDING";
+  if (hasLineChanges) {
+    const settings = await purchaseSettingService.getSettings();
+    const taxDefaults = buildTaxDefaults(settings);
+    recalculateInvoice(invoice, payload, taxDefaults);
   }
+
   if (payload.paymentMethod) invoice.paymentMethod = payload.paymentMethod;
   if (payload.dueDate) invoice.dueDate = new Date(payload.dueDate);
   if (payload.settlementSplits) {
@@ -504,11 +340,6 @@ exports.configureInvoice = async (id, payload = {}) => {
 exports.finalizeInvoice = async (id, userId = null, payload = {}) => {
   const invoice = await CustomerInvoice.findById(id);
   if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
-  if (invoice.quotationStatus === "CANCELLED") {
-    throw Object.assign(new Error("Cancelled quotations cannot move to invoice stage"), {
-      statusCode: 400,
-    });
-  }
   const settings = await purchaseSettingService.getSettings();
   const taxDefaults = buildTaxDefaults(settings);
 
@@ -523,7 +354,7 @@ exports.finalizeInvoice = async (id, userId = null, payload = {}) => {
   if (payload.invoiceType && ["CLIENT", "SUPPLIER"].includes(payload.invoiceType)) {
     invoice.invoiceType = payload.invoiceType;
   }
-  invoice.documentStage = "INVOICE";
+
   invoice.finalizedAt = invoice.finalizedAt || new Date();
   if (payload.note) {
     invoice.notes = [invoice.notes, payload.note].filter(Boolean).join("\n");
@@ -539,11 +370,6 @@ exports.finalizeInvoice = async (id, userId = null, payload = {}) => {
 exports.registerPayment = async (id, payload = {}) => {
   const invoice = await CustomerInvoice.findById(id);
   if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
-  if (invoice.documentStage !== "INVOICE") {
-    throw Object.assign(new Error("Finalize the quotation as an invoice before registering payment"), {
-      statusCode: 400,
-    });
-  }
 
   const method = payload.method || invoice.paymentMethod;
   if (!method || method === "UNSET") {
@@ -664,11 +490,6 @@ exports.registerPayment = async (id, payload = {}) => {
 exports.clearChequePayment = async (id, paymentId) => {
   const invoice = await CustomerInvoice.findById(id);
   if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
-  if (invoice.documentStage !== "INVOICE") {
-    throw Object.assign(new Error("Only invoices can clear cheque payments"), {
-      statusCode: 400,
-    });
-  }
 
   const payment = invoice.payments.id(paymentId);
   if (!payment || payment.method !== "CHEQUE") {
@@ -717,11 +538,6 @@ exports.sendInvoice = async (id, userId = null, payload = {}) => {
 exports.sendReminder = async (id, userId = null, payload = {}) => {
   const invoice = await CustomerInvoice.findById(id);
   if (!invoice) throw Object.assign(new Error("Customer invoice not found"), { statusCode: 404 });
-  if (invoice.documentStage !== "INVOICE") {
-    throw Object.assign(new Error("Only invoices can enter the reminder workflow"), {
-      statusCode: 400,
-    });
-  }
   if (!invoice.sentAt) {
     throw Object.assign(new Error("Invoice must be sent before reminders"), { statusCode: 400 });
   }

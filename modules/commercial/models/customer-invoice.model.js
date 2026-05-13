@@ -87,18 +87,6 @@ const customerInvoiceSchema = new mongoose.Schema(
       default: "CLIENT",
       index: true,
     },
-    documentStage: {
-      type: String,
-      enum: ["QUOTATION", "INVOICE"],
-      default: "QUOTATION",
-      index: true,
-    },
-    quotationStatus: {
-      type: String,
-      enum: ["PENDING", "SENT", "ACCEPTED", "REJECTED", "CANCELLED"],
-      default: "PENDING",
-      index: true,
-    },
     pricingMode: { type: String, enum: ["HT_BASED", "TTC_BASED"], default: "HT_BASED" },
     applyTva: { type: Boolean, default: true },
     applyFodec: { type: Boolean, default: true },
