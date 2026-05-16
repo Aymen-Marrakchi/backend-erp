@@ -4,6 +4,7 @@ const CompanySettings = require("../models/company-settings.model");
 const PurchaseInvoice = require("../../purchase/models/purchase-invoice.model");
 const PurchasePayment = require("../../purchase/models/purchase-payment.model");
 const CustomerInvoice = require("../../commercial/models/customer-invoice.model");
+const User = require("../../../models/User");
 
 function roundAmount(value) {
   return Math.round((Number(value || 0) + Number.EPSILON) * 1000) / 1000;
@@ -183,26 +184,39 @@ exports.recordInvoiceIssued = async (invoice) => {
   const totalFodec = roundAmount(Number(invoice.totalFodec || 0));
   const timbreFiscal = roundAmount(Number(invoice.timbreFiscal || 0));
 
-  return upsertEntry("CUSTOMER_INVOICE_FINALIZED", invoice._id, {
-    entryType: "INVOICE_ISSUED",
-    direction: "INFLOW",
-    sourceModule: "COMMERCIAL",
-    reference: invoice.invoiceNo,
-    counterpartyType: "CUSTOMER",
-    counterpartyId: String(invoice.customerId || ""),
-    counterpartyName: invoice.customerName || "",
-    amount: totalTtc,
-    status: "OPEN",
-    occurredAt: invoice.finalizedAt || invoice.issueDate || new Date(),
-    notes: `Facture ${invoice.invoiceNo} émise`,
-    metadata: {
-      subtotalHt,
-      totalVat,
-      totalFodec,
-      timbreFiscal,
-      salesOrderId: String(invoice.salesOrderId || ""),
+  // $set for amount/metadata so re-finalization always reflects current invoice totals.
+  // $setOnInsert only for immutable identity fields.
+  return FinanceEntry.findOneAndUpdate(
+    { sourceType: "CUSTOMER_INVOICE_FINALIZED", sourceId: String(invoice._id) },
+    {
+      $setOnInsert: {
+        entryType: "INVOICE_ISSUED",
+        direction: "INFLOW",
+        sourceModule: "COMMERCIAL",
+        counterpartyType: "CUSTOMER",
+        counterpartyId: String(invoice.customerId || ""),
+        counterpartyName: invoice.customerName || "",
+        currency: "TND",
+        status: "OPEN",
+        sourceType: "CUSTOMER_INVOICE_FINALIZED",
+        sourceId: String(invoice._id),
+      },
+      $set: {
+        reference: invoice.invoiceNo,
+        amount: totalTtc,
+        occurredAt: invoice.finalizedAt || invoice.issueDate || new Date(),
+        notes: `Facture ${invoice.invoiceNo} émise`,
+        metadata: {
+          subtotalHt,
+          totalVat,
+          totalFodec,
+          timbreFiscal,
+          salesOrderId: String(invoice.salesOrderId || ""),
+        },
+      },
     },
-  });
+    { returnDocument: "after", upsert: true }
+  );
 };
 
 exports.recordReglement = async ({ invoice, payment }) => {
@@ -235,42 +249,56 @@ exports.recordReglement = async ({ invoice, payment }) => {
     const remaining = roundAmount(
       Number(invoice.totalTtc || 0) - Number(invoice.amountPaid || 0)
     );
-    invoiceEntry.amount = Math.max(0, remaining);
+    // Keep amount = original totalTtc so journal lines stay balanced (DR 411 = CR 706 + taxes).
+    // Only track payment state via status.
     invoiceEntry.status = remaining <= 0 ? "SETTLED" : "OPEN";
     await invoiceEntry.save();
   }
 };
 
 exports.recordPurchaseInvoiceApproved = async (invoice) => {
-  const outstanding = roundAmount(
-    Number(invoice.totalTtc || 0) - Number(invoice.creditNoteAmount || 0)
-  );
+  const totalTtc = roundAmount(Number(invoice.totalTtc || 0));
   const subtotalHt = roundAmount(Number(invoice.subtotalHt || 0));
   const totalVat = roundAmount(Number(invoice.totalVat || 0));
   const totalFodec = roundAmount(Number(invoice.totalFodec || 0));
   const timbreFiscal = roundAmount(Number(invoice.timbreFiscal || 0));
+  const creditNoteAmount = roundAmount(Number(invoice.creditNoteAmount || 0));
+  // Use totalTtc (not outstanding) so DR 607+taxes = CR 401 = totalTtc — balanced.
+  // Credit notes are recorded separately via PAYABLE_CREDIT entries.
+  const outstanding = roundAmount(Math.max(0, totalTtc - creditNoteAmount));
 
-  return upsertEntry("PURCHASE_INVOICE_APPROVED", invoice._id, {
-    entryType: "PAYABLE_RECORDED",
-    direction: "OUTFLOW",
-    sourceModule: "PURCHASE",
-    reference: invoice.invoiceNo,
-    counterpartyType: "SUPPLIER",
-    counterpartyId: String(invoice.supplierId),
-    amount: Math.max(0, outstanding),
-    status: Math.max(0, outstanding) > 0 ? "OPEN" : "SETTLED",
-    occurredAt: invoice.approvedAt || new Date(),
-    notes: `Facture fournisseur ${invoice.invoiceNo} approuvée`,
-    metadata: {
-      subtotalHt,
-      totalVat,
-      totalFodec,
-      timbreFiscal,
-      purchaseOrderId: String(invoice.purchaseOrderId),
-      totalTtc: Number(invoice.totalTtc || 0),
-      creditNoteAmount: Number(invoice.creditNoteAmount || 0),
+  return FinanceEntry.findOneAndUpdate(
+    { sourceType: "PURCHASE_INVOICE_APPROVED", sourceId: String(invoice._id) },
+    {
+      $setOnInsert: {
+        entryType: "PAYABLE_RECORDED",
+        direction: "OUTFLOW",
+        sourceModule: "PURCHASE",
+        counterpartyType: "SUPPLIER",
+        counterpartyId: String(invoice.supplierId),
+        currency: "TND",
+        sourceType: "PURCHASE_INVOICE_APPROVED",
+        sourceId: String(invoice._id),
+      },
+      $set: {
+        reference: invoice.invoiceNo,
+        amount: totalTtc,
+        status: outstanding > 0 ? "OPEN" : "SETTLED",
+        occurredAt: invoice.approvedAt || new Date(),
+        notes: `Facture fournisseur ${invoice.invoiceNo} approuvée`,
+        metadata: {
+          subtotalHt,
+          totalVat,
+          totalFodec,
+          timbreFiscal,
+          purchaseOrderId: String(invoice.purchaseOrderId),
+          totalTtc,
+          creditNoteAmount,
+        },
+      },
     },
-  });
+    { returnDocument: "after", upsert: true }
+  );
 };
 
 exports.recordPurchasePayment = async ({ payment, invoice }) => {
@@ -307,7 +335,7 @@ exports.recordPurchasePayment = async ({ payment, invoice }) => {
         Number(invoice.creditNoteAmount || 0) -
         Number(invoice.amountPaid || 0)
     );
-    payableEntry.amount = Math.max(0, remaining);
+    // Keep amount = original outstanding so journal lines stay balanced (DR 607/taxes = CR 401).
     payableEntry.status = remaining > 0 ? "OPEN" : "SETTLED";
     await payableEntry.save();
   }
@@ -344,10 +372,29 @@ exports.recordPurchaseReturnCredit = async ({ purchaseReturn, invoice }) => {
         Number(invoice.creditNoteAmount || 0) -
         Number(invoice.amountPaid || 0)
     );
-    payableEntry.amount = Math.max(0, remaining);
+    // Keep original amount intact for balanced journal entries; only update status.
     payableEntry.status = remaining > 0 ? "OPEN" : "SETTLED";
     await payableEntry.save();
   }
+};
+
+// ─── Resync ───────────────────────────────────────────────────────────────────
+
+exports.resyncFinanceEntries = async () => {
+  const clientInvoices = await CustomerInvoice.find(CLIENT_INVOICE_FILTER);
+  for (const invoice of clientInvoices) {
+    await exports.recordInvoiceIssued(invoice);
+  }
+
+  const purchaseInvoices = await PurchaseInvoice.find({ approvedAt: { $exists: true, $ne: null } });
+  for (const invoice of purchaseInvoices) {
+    await exports.recordPurchaseInvoiceApproved(invoice);
+  }
+
+  return {
+    totalClientInvoices: clientInvoices.length,
+    totalPurchaseInvoices: purchaseInvoices.length,
+  };
 };
 
 // ─── TEJ ──────────────────────────────────────────────────────────────────────
@@ -355,7 +402,7 @@ exports.recordPurchaseReturnCredit = async ({ purchaseReturn, invoice }) => {
 exports.updateInvoiceTej = async (invoiceId, payload) => {
   const invoice = await CustomerInvoice.findById(invoiceId);
   if (!invoice) throw Object.assign(new Error("Facture introuvable"), { statusCode: 404 });
-  if (invoice.documentStage !== "INVOICE")
+  if (!invoice.finalizedAt)
     throw Object.assign(new Error("Seules les factures finalisées acceptent une référence TEJ"), { statusCode: 400 });
 
   const { tejReference, tejStatus, tejQrData } = payload;
@@ -441,11 +488,20 @@ exports.getRsPayments = async () => {
 
 // ─── Query Functions ──────────────────────────────────────────────────────────
 
+const CLIENT_INVOICE_FILTER = {
+  $and: [
+    { $or: [{ finalizedAt: { $ne: null } }, { amountPaid: { $gt: 0 } }] },
+    { $or: [{ invoiceType: "CLIENT" }, { invoiceType: { $exists: false } }] },
+  ],
+};
+
 exports.getDashboard = async () => {
+  const clientInvoiceFilter = CLIENT_INVOICE_FILTER;
+
   const [purchaseInvoices, purchasePayments, customerInvoices, entries] = await Promise.all([
     PurchaseInvoice.find().populate("supplierId", "supplierNo name"),
     PurchasePayment.find().populate("supplierId", "supplierNo name"),
-    CustomerInvoice.find({ documentStage: "INVOICE" }).sort({ createdAt: -1 }),
+    CustomerInvoice.find(clientInvoiceFilter).sort({ createdAt: -1 }),
     FinanceEntry.find().sort({ occurredAt: -1, createdAt: -1 }).limit(8),
   ]);
 
@@ -466,8 +522,12 @@ exports.getDashboard = async () => {
       0
     )
   );
+  // Actual cash out = gross payment minus withholding tax retained (RS goes to account 4028, not to supplier)
   const totalPaidOut = roundAmount(
-    purchasePayments.reduce((sum, p) => sum + Number(p.amount || 0), 0)
+    purchasePayments.reduce(
+      (sum, p) => sum + Math.max(0, Number(p.amount || 0) - Number(p.rsAmount || 0)),
+      0
+    )
   );
   const totalReceivables = roundAmount(
     customerInvoices.reduce(
@@ -477,6 +537,10 @@ exports.getDashboard = async () => {
   );
   const recognizedRevenue = roundAmount(
     customerInvoices.reduce((sum, inv) => sum + Number(inv.totalTtc || 0), 0)
+  );
+  // Total cash actually received from clients (sum of all amountPaid on invoices)
+  const totalCollected = roundAmount(
+    customerInvoices.reduce((sum, inv) => sum + Number(inv.amountPaid || 0), 0)
   );
   const overduePayables = payableInvoices.filter((inv) => {
     const outstanding =
@@ -491,6 +555,7 @@ exports.getDashboard = async () => {
       totalPayablesOutstanding,
       totalPaidOut,
       totalReceivables,
+      totalCollected,
       recognizedRevenue,
       netExpectedCash: roundAmount(totalReceivables - totalPayablesOutstanding),
       overduePayables,
@@ -500,7 +565,7 @@ exports.getDashboard = async () => {
 };
 
 exports.getReceivables = async () => {
-  const invoices = await CustomerInvoice.find({ documentStage: "INVOICE" })
+  const invoices = await CustomerInvoice.find(CLIENT_INVOICE_FILTER)
     .populate("salesOrderId", "orderNo status shippedAt deliveredAt closedAt promisedDate trackingNumber")
     .sort({ issueDate: -1, createdAt: -1 });
 
@@ -580,7 +645,8 @@ exports.getTreasury = async () => {
     _id: String(p._id),
     reference: p.paymentNo,
     direction: "OUTFLOW",
-    amount: roundAmount(p.amount),
+    // Net cash = gross amount minus withholding tax retained (RS)
+    amount: roundAmount(Math.max(0, Number(p.amount || 0) - Number(p.rsAmount || 0))),
     method: p.method,
     date: p.paymentDate,
     counterparty: p.supplierId?.name || "Fournisseur inconnu",
@@ -639,8 +705,17 @@ exports.getJournal = async () => {
 };
 
 exports.getAccounts = async () => {
-  const journalEntries = await exports.getJournal();
-  return buildAccountSummaries(journalEntries);
+  // Fetch ALL entries (no limit) for accurate account balances used in reports.
+  // getJournal() has a display limit of 500 — do not use it here.
+  const [autoEntries, manualEntries] = await Promise.all([
+    FinanceEntry.find().sort({ occurredAt: 1, createdAt: 1 }),
+    ManualJournalEntry.find().sort({ occurredAt: 1, createdAt: 1 }),
+  ]);
+  const all = [
+    ...autoEntries.map(toJournalEntry),
+    ...manualEntries.map(toManualJournalEntry),
+  ];
+  return buildAccountSummaries(all);
 };
 
 exports.getAccountLedger = async (accountCode) => {
@@ -755,22 +830,38 @@ exports.getTvaDeclaration = async (year, month) => {
 // ─── Calendar ─────────────────────────────────────────────────────────────────
 
 exports.getCalendar = async (year, month) => {
-  const start = new Date(Number(year), Number(month) - 1, 1);
-  const end = new Date(Number(year), Number(month), 1);
+  const y = Number(year);
+  const m = Number(month);
+  // Use UTC boundaries so key generation stays consistent regardless of server timezone
+  const start = new Date(Date.UTC(y, m - 1, 1));
+  const end   = new Date(Date.UTC(y, m,     1));
 
-  const entries = await FinanceEntry.find({
-    occurredAt: { $gte: start, $lt: end },
-    entryType: { $in: ["REGLEMENT_RECU", "PAYABLE_PAYMENT"] },
-  });
+  const [entries, kumbilInvoices] = await Promise.all([
+    FinanceEntry.find({
+      occurredAt: { $gte: start, $lt: end },
+      entryType: { $in: ["REGLEMENT_RECU", "PAYABLE_PAYMENT"] },
+    }),
+    CustomerInvoice.find({
+      paymentMethod: "KUMBIL",
+      "installments.dueDate": { $gte: start, $lt: end },
+    }).select("installments").lean(),
+  ]);
 
   const days = {};
 
-  for (const entry of entries) {
-    const d = new Date(entry.occurredAt);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const ensureDay = (key) => {
     if (!days[key]) {
-      days[key] = { inflows: 0, outflows: 0, net: 0, inflowCount: 0, outflowCount: 0 };
+      days[key] = { inflows: 0, outflows: 0, net: 0, inflowCount: 0, outflowCount: 0, kumbilExpected: 0, kumbilCount: 0 };
     }
+  };
+
+  // Build a YYYY-MM-DD key from a Date using UTC methods
+  const dateKey = (d) =>
+    `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+
+  for (const entry of entries) {
+    const key = dateKey(new Date(entry.occurredAt));
+    ensureDay(key);
     if (entry.entryType === "REGLEMENT_RECU") {
       days[key].inflows = roundAmount(days[key].inflows + Number(entry.amount || 0));
       days[key].inflowCount++;
@@ -780,11 +871,26 @@ exports.getCalendar = async (year, month) => {
     }
   }
 
+  for (const invoice of kumbilInvoices) {
+    for (const inst of (invoice.installments || [])) {
+      if (!["PENDING", "PARTIAL", "LATE"].includes(inst.status)) continue;
+      const d = new Date(inst.dueDate);
+      if (d < start || d >= end) continue;
+      const key = dateKey(d);
+      ensureDay(key);
+      const remaining = roundAmount(Number(inst.plannedAmount || 0) - Number(inst.paidAmount || 0));
+      days[key].inflows = roundAmount(days[key].inflows + remaining);
+      days[key].inflowCount++;
+      days[key].kumbilExpected = roundAmount(days[key].kumbilExpected + remaining);
+      days[key].kumbilCount++;
+    }
+  }
+
   for (const key of Object.keys(days)) {
     days[key].net = roundAmount(days[key].inflows - days[key].outflows);
   }
 
-  return { year: Number(year), month: Number(month), days };
+  return { year: y, month: m, days };
 };
 
 exports.getCompanySettings = async () => {
@@ -809,4 +915,111 @@ exports.updateCompanySettings = async (payload) => {
   }
   await settings.save();
   return settings;
+};
+
+exports.getSalesReport = async (from, to) => {
+  const start = new Date(from);
+  const end = new Date(to);
+  end.setHours(23, 59, 59, 999);
+
+  const invoices = await CustomerInvoice.find({
+    $and: [
+      ...CLIENT_INVOICE_FILTER.$and,
+      { issueDate: { $gte: start, $lte: end } },
+    ],
+  }).sort({ issueDate: 1 });
+
+  const totalCount = invoices.length;
+  const totalHt = roundAmount(invoices.reduce((s, inv) => s + (inv.subtotalHt || 0), 0));
+  const totalTtc = roundAmount(invoices.reduce((s, inv) => s + (inv.totalTtc || 0), 0));
+  const paidInvoices = invoices.filter((inv) => inv.paymentStatus === "PAYEE");
+  const totalPaid = roundAmount(paidInvoices.reduce((s, inv) => s + (inv.totalTtc || 0), 0));
+  const totalUnpaid = roundAmount(totalTtc - totalPaid);
+
+  const byMonthMap = {};
+  for (const inv of invoices) {
+    const d = new Date(inv.issueDate);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    if (!byMonthMap[key]) byMonthMap[key] = { month: key, count: 0, totalHt: 0, totalTtc: 0 };
+    byMonthMap[key].count++;
+    byMonthMap[key].totalHt = roundAmount(byMonthMap[key].totalHt + (inv.subtotalHt || 0));
+    byMonthMap[key].totalTtc = roundAmount(byMonthMap[key].totalTtc + (inv.totalTtc || 0));
+  }
+
+  const byCustomerMap = {};
+  for (const inv of invoices) {
+    const name = inv.customerName || "—";
+    if (!byCustomerMap[name]) byCustomerMap[name] = { customerName: name, count: 0, totalTtc: 0 };
+    byCustomerMap[name].count++;
+    byCustomerMap[name].totalTtc = roundAmount(byCustomerMap[name].totalTtc + (inv.totalTtc || 0));
+  }
+
+  return {
+    period: { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) },
+    summary: {
+      totalCount,
+      totalHt,
+      totalTtc,
+      totalPaid,
+      totalUnpaid,
+      paidCount: paidInvoices.length,
+      unpaidCount: totalCount - paidInvoices.length,
+    },
+    byMonth: Object.values(byMonthMap).sort((a, b) => a.month.localeCompare(b.month)),
+    topCustomers: Object.values(byCustomerMap)
+      .sort((a, b) => b.totalTtc - a.totalTtc)
+      .slice(0, 8),
+  };
+};
+
+exports.getDepartmentExpenses = async () => {
+  const rows = await User.aggregate([
+    { $match: { department: { $ne: "None" }, status: { $ne: "Inactive" } } },
+    {
+      $group: {
+        _id: "$department",
+        employeeCount: { $sum: 1 },
+        activeCount: { $sum: { $cond: [{ $eq: ["$status", "Active"] }, 1, 0] } },
+        onLeaveCount: { $sum: { $cond: [{ $eq: ["$status", "On Leave"] }, 1, 0] } },
+        totalSalary: { $sum: "$salary" },
+        avgSalary: { $avg: "$salary" },
+      },
+    },
+    { $sort: { totalSalary: -1 } },
+  ]);
+
+  const departments = rows.map((r) => ({
+    department: r._id,
+    employeeCount: r.employeeCount,
+    activeCount: r.activeCount,
+    onLeaveCount: r.onLeaveCount,
+    totalSalary: roundAmount(r.totalSalary),
+    avgSalary: roundAmount(r.avgSalary || 0),
+  }));
+
+  const totalSalary = roundAmount(departments.reduce((s, d) => s + d.totalSalary, 0));
+  const totalEmployees = departments.reduce((s, d) => s + d.employeeCount, 0);
+
+  return { departments, totalSalary, totalEmployees };
+};
+
+exports.payPayable = async (invoiceId, { method, amount, paymentDate, notes = "", createdBy = null }) => {
+  const invoice = await PurchaseInvoice.findById(invoiceId);
+  if (!invoice) {
+    throw Object.assign(new Error("Facture introuvable"), { statusCode: 404 });
+  }
+  if (!["APPROVED", "PARTIALLY_PAID"].includes(invoice.status)) {
+    throw Object.assign(new Error("Seules les factures approuvées peuvent être payées"), { statusCode: 400 });
+  }
+
+  const purchasePaymentService = require("../../purchase/services/purchase-payment.service");
+  return purchasePaymentService.createPurchasePayment({
+    supplierId: invoice.supplierId.toString(),
+    purchaseInvoiceId: invoiceId,
+    method,
+    amount,
+    paymentDate,
+    notes,
+    createdBy,
+  });
 };

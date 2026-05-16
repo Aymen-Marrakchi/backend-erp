@@ -1,5 +1,6 @@
 const PurchaseReceipt = require("../models/purchase-receipt.model");
 const PurchaseOrder = require("../models/purchase-order.model");
+const PurchaseInvoice = require("../models/purchase-invoice.model");
 const Depot = require("../../stock/models/depot.model");
 const StockProduct = require("../../stock/models/product.model");
 const stockMovementService = require("../../stock/services/stock-movement.service");
@@ -151,6 +152,31 @@ exports.createReceipt = async ({
     notes,
     createdBy,
   });
+
+  // Auto-create a purchase invoice for this PO if none exists yet
+  const existingInvoice = await PurchaseInvoice.findOne({ purchaseOrderId: purchaseOrder._id });
+  if (!existingInvoice) {
+    try {
+      const purchaseInvoiceService = require("./purchase-invoice.service");
+      const today = new Date();
+      const due = new Date(today);
+      due.setDate(due.getDate() + 30);
+      await purchaseInvoiceService.createPurchaseInvoice({
+        supplierInvoiceRef: receipt.receiptNo,
+        supplierId: purchaseOrder.supplierId._id.toString(),
+        purchaseOrderId: purchaseOrder._id.toString(),
+        receiptIds: [receipt._id.toString()],
+        invoiceDate: today.toISOString(),
+        dueDate: due.toISOString(),
+        applyTva: true,
+        applyFodec: true,
+        createdBy,
+      });
+    } catch (e) {
+      // Non-fatal: receipt is already saved, invoice creation is best-effort
+      console.warn("[auto-invoice] failed:", e.message);
+    }
+  }
 
   return exports.getReceiptById(receipt._id);
 };

@@ -1,74 +1,43 @@
-const CommercialNotification = require("../models/notification.model");
+const Notification = require("../../../models/Notification");
 
 exports.getAll = async () =>
-  CommercialNotification.find()
-    .populate("relatedOrderId", "orderNo status shippedAt deliveredAt")
+  Notification.find({ module: "COMMERCIAL" })
     .populate("createdBy", "name email role")
     .sort({ createdAt: -1 });
 
 exports.markRead = async (id) => {
-  const notification = await CommercialNotification.findById(id);
+  const notification = await Notification.findById(id);
   if (!notification) {
     throw Object.assign(new Error("Notification not found"), { statusCode: 404 });
   }
-
   notification.isRead = true;
   notification.readAt = new Date();
   await notification.save();
-
-  return CommercialNotification.findById(notification._id)
-    .populate("relatedOrderId", "orderNo status shippedAt deliveredAt")
-    .populate("createdBy", "name email role");
+  return Notification.findById(notification._id).populate("createdBy", "name email role");
 };
 
 exports.createForShipment = async (order, createdBy = null) => {
-  const payloads = [
+  await Notification.insertMany([
     {
-      audience: "INTERNAL",
+      module: "COMMERCIAL",
       eventType: "ORDER_SHIPPED",
-      title: `Order ${order.orderNo} shipped`,
-      message: `Order ${order.orderNo} for ${order.customerName} was shipped and is now in transit.`,
-    },
-    {
-      audience: "CUSTOMER",
-      eventType: "ORDER_SHIPPED",
-      title: `Your order ${order.orderNo} has shipped`,
-      message: `Your order ${order.orderNo} has been shipped. Delivery is in progress.`,
-    },
-  ];
-
-  await CommercialNotification.insertMany(
-    payloads.map((entry) => ({
-      ...entry,
-      relatedOrderId: order._id,
-      customerName: order.customerName,
+      title: `Commande ${order.orderNo} expédiée`,
+      message: `La commande ${order.orderNo} pour ${order.customerName} a été expédiée et est en transit.`,
+      metadata: { orderNo: order.orderNo, customerName: order.customerName, orderId: order._id },
       createdBy,
-    }))
-  );
+    },
+  ]);
 };
 
 exports.createForDelivery = async (order, createdBy = null) => {
-  const payloads = [
+  await Notification.insertMany([
     {
-      audience: "INTERNAL",
+      module: "COMMERCIAL",
       eventType: "ORDER_DELIVERED",
-      title: `Order ${order.orderNo} delivered`,
-      message: `Order ${order.orderNo} for ${order.customerName} was marked as delivered.`,
-    },
-    {
-      audience: "CUSTOMER",
-      eventType: "ORDER_DELIVERED",
-      title: `Your order ${order.orderNo} is delivered`,
-      message: `Your order ${order.orderNo} has been delivered successfully.`,
-    },
-  ];
-
-  await CommercialNotification.insertMany(
-    payloads.map((entry) => ({
-      ...entry,
-      relatedOrderId: order._id,
-      customerName: order.customerName,
+      title: `Commande ${order.orderNo} livrée`,
+      message: `La commande ${order.orderNo} pour ${order.customerName} a été marquée comme livrée.`,
+      metadata: { orderNo: order.orderNo, customerName: order.customerName, orderId: order._id },
       createdBy,
-    }))
-  );
+    },
+  ]);
 };

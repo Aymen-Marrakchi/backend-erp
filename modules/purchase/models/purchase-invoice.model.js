@@ -164,6 +164,11 @@ const purchaseInvoiceSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+    attachmentUrl: {
+      type: String,
+      default: null,
+      trim: true,
+    },
   },
   { timestamps: true }
 );

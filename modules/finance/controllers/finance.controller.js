@@ -148,3 +148,43 @@ exports.updateSettings = async (req, reply) => {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }
 };
+
+exports.getDepartmentExpenses = async (req, reply) => {
+  try {
+    return reply.code(200).send(await financeService.getDepartmentExpenses());
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.getSalesReport = async (req, reply) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) {
+      return reply.code(400).send({ message: "Les paramètres 'from' et 'to' sont requis" });
+    }
+    return reply.code(200).send(await financeService.getSalesReport(from, to));
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.payPayable = async (req, reply) => {
+  try {
+    const result = await financeService.payPayable(req.params.id, {
+      ...req.body,
+      createdBy: req.user?._id,
+    });
+    return reply.code(200).send(result);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.resyncFinanceEntries = async (req, reply) => {
+  try {
+    return reply.code(200).send(await financeService.resyncFinanceEntries());
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};

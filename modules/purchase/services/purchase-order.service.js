@@ -2,6 +2,7 @@ const PurchaseOrder = require("../models/purchase-order.model");
 const PurchaseRequest = require("../models/purchase-request.model");
 const Tender = require("../models/tender.model");
 const Supplier = require("../models/supplier.model");
+const Notification = require("../../../models/Notification");
 
 async function generatePurchaseOrderNo() {
   const count = await PurchaseOrder.countDocuments();
@@ -187,6 +188,13 @@ exports.updatePurchaseOrderStatus = async (id, status) => {
   if (status === "VALIDATED") {
     purchaseOrder.validationLevel += 1;
     purchaseOrder.validatedAt = new Date();
+    Notification.create({
+      module: "PURCHASE",
+      eventType: "PO_VALIDATED",
+      title: `Bon de commande ${purchaseOrder.orderNo} validé`,
+      message: `Le bon de commande ${purchaseOrder.orderNo} a été validé et est prêt à être envoyé au fournisseur.`,
+      metadata: { orderNo: purchaseOrder.orderNo, orderId: purchaseOrder._id },
+    }).catch(() => {});
   }
   if (status === "SENT") {
     purchaseOrder.sentAt = new Date();

@@ -87,3 +87,21 @@ exports.sendReminder = async (req, reply) => {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }
 };
+
+exports.getAllKumbilInvoices = async (req, reply) => {
+  try {
+    return reply.code(200).send(await customerInvoiceService.getAllKumbilInvoices());
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.cancelInstallment = async (req, reply) => {
+  try {
+    return reply.code(200).send(
+      await customerInvoiceService.cancelInstallment(req.params.id, Number(req.params.index))
+    );
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};

@@ -76,6 +76,8 @@ exports.createPurchaseInvoice = async ({
   dueDate,
   applyTva = true,
   applyFodec = true,
+  subtotalHt: manualSubtotalHt,
+  attachmentUrl = null,
   notes = "",
   createdBy = null,
 }) => {
@@ -139,7 +141,10 @@ exports.createPurchaseInvoice = async ({
   }
 
   const expectedTotals = computeInvoiceTotals(expectedSubtotalHt, taxConfig);
-  const actualTotals = expectedTotals;
+  const actualTotals =
+    manualSubtotalHt !== undefined
+      ? computeInvoiceTotals(manualSubtotalHt, taxConfig)
+      : expectedTotals;
 
   const matchingStatus =
     actualTotals.subtotalHt === expectedTotals.subtotalHt &&
@@ -174,6 +179,7 @@ exports.createPurchaseInvoice = async ({
     expectedTotalTtc: expectedTotals.totalTtc,
     matchingStatus,
     notes,
+    attachmentUrl,
     createdBy,
   });
 

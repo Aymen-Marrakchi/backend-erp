@@ -3,6 +3,7 @@
 
 const Fastify = require("fastify");
 const dotenv = require("dotenv");
+const path = require("path");
 const deptRoutes = require("./routes/department.routes");
 const cyclicOrderService = require("./modules/production/services/cyclic-order.service");
 
@@ -47,6 +48,14 @@ fastify.register(require("@fastify/swagger-ui"), {
   },
   exposeRoute: true,
 });
+fastify.register(require("@fastify/multipart"), {
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+fastify.register(require("@fastify/static"), {
+  root: path.join(__dirname, "uploads"),
+  prefix: "/uploads/",
+  decorateReply: false,
+});
 fastify.register(require("@fastify/cors"), {
   origin: (origin, cb) => {
     const isLocalDevOrigin =
@@ -68,6 +77,7 @@ fastify.register(require("./plugins/jwt.plugin"));     // JWT + fastify.authenti
 // ── Routes ─────────────────────────────────────────────────
 fastify.register(require("./routes/auth.routes"),  { prefix: "/api/auth"  });
 fastify.register(require("./routes/admin.routes"), { prefix: "/api/admin" });
+fastify.register(require("./routes/notifications.routes"), { prefix: "/api/notifications" });
 fastify.register(require("./modules/stock/routes/stock.routes"), { prefix: "/api/stock" });
 fastify.register(require("./modules/stock/routes/product.routes"), { prefix: "/api/stock/products" });
 fastify.register(require("./modules/stock/routes/threshold.routes"), { prefix: "/api/stock/threshold-rules" });
@@ -138,6 +148,15 @@ fastify.register(require("./modules/purchase/routes/purchase-return.routes"), {
 });
 fastify.register(require("./modules/purchase/routes/purchase-setting.routes"), {
   prefix: "/api/purchase/settings",
+});
+fastify.register(require("./modules/purchase/routes/purchase-scan.routes"), {
+  prefix: "/api/purchase/scan",
+});
+fastify.register(require("./modules/purchase/routes/supplementary-request.routes"), {
+  prefix: "/api/purchase/supplementary",
+});
+fastify.register(require("./modules/purchase/routes/supplementary-category.routes"), {
+  prefix: "/api/purchase/supplementary/categories",
 });
 fastify.register(require("./modules/finance/routes/finance.routes"), {
   prefix: "/api/finance",

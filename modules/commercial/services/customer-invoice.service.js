@@ -261,7 +261,13 @@ function updateInvoicePaymentState(invoice) {
     return;
   }
 
-  if (amountPaid >= totalTtc) {
+  if (amountPaid >= totalTtc && totalTtc > 0) {
+    invoice.paymentStatus = "PAYEE";
+    invoice.paidAt = invoice.paidAt || new Date();
+    return;
+  }
+
+  if (invoice.paymentMethod === "KUMBIL") {
     invoice.paymentStatus = "PAYEE";
     invoice.paidAt = invoice.paidAt || new Date();
     return;
@@ -530,6 +536,30 @@ exports.sendInvoice = async (id, userId = null, payload = {}) => {
   invoice.sentBy = userId;
   if (payload.note) {
     invoice.notes = [invoice.notes, payload.note].filter(Boolean).join("\n");
+  }
+  await invoice.save();
+  return exports.getInvoiceById(invoice._id);
+};
+
+exports.getAllKumbilInvoices = async () =>
+  populateInvoice(
+    CustomerInvoice.find({ paymentMethod: "KUMBIL", "installments.0": { $exists: true } })
+  ).sort({ createdAt: -1 });
+
+exports.cancelInstallment = async (id, index) => {
+  const invoice = await CustomerInvoice.findById(id);
+  if (!invoice) throw Object.assign(new Error("Invoice not found"), { statusCode: 404 });
+  if (index < 0 || index >= invoice.installments.length) {
+    throw Object.assign(new Error("Installment not found"), { statusCode: 404 });
+  }
+  invoice.installments.splice(index, 1);
+  // If all installments removed, reset to unpaid so the invoice reappears in payments
+  if (invoice.installments.length === 0) {
+    invoice.paymentMethod = "UNSET";
+    invoice.paymentStatus = roundAmount(Number(invoice.amountPaid || 0)) > 0
+      ? "PARTIELLEMENT_PAYEE"
+      : "NON_PAYEE";
+    invoice.paidAt = null;
   }
   await invoice.save();
   return exports.getInvoiceById(invoice._id);

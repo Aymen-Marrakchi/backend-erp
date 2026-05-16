@@ -36,7 +36,7 @@ const installmentSchema = new mongoose.Schema(
     plannedAmount: { type: Number, required: true, min: 0 },
     paidAmount: { type: Number, default: 0, min: 0 },
     paidAt: { type: Date, default: null },
-    status: { type: String, enum: ["PENDING", "PARTIAL", "PAID"], default: "PENDING" },
+    status: { type: String, enum: ["PENDING", "PARTIAL", "PAID", "LATE"], default: "PENDING" },
   },
   { _id: true }
 );
@@ -107,7 +107,7 @@ const customerInvoiceSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ["NON_PAYEE", "PARTIELLEMENT_PAYEE", "PENDING_CHEQUE", "PAYEE"],
+      enum: ["NON_PAYEE", "PARTIELLEMENT_PAYEE", "PENDING_CHEQUE", "KUMBIL_EN_COURS", "PAYEE"],
       default: "NON_PAYEE",
       index: true,
     },

@@ -13,6 +13,8 @@ async function financeRoutes(fastify) {
   fastify.get("/accounts", { preHandler: access }, controller.getAccounts);
   fastify.get("/accounts/:code", { preHandler: access }, controller.getAccountLedger);
   fastify.get("/reports", { preHandler: access }, controller.getReports);
+  fastify.get("/reports/department-expenses", { preHandler: access }, controller.getDepartmentExpenses);
+  fastify.get("/reports/sales", { preHandler: access }, controller.getSalesReport);
 
   // TEJ
   fastify.patch("/invoices/:id/tej", { preHandler: access }, controller.updateInvoiceTej);
@@ -34,6 +36,12 @@ async function financeRoutes(fastify) {
   // Company settings
   fastify.get("/settings", { preHandler: access }, controller.getSettings);
   fastify.put("/settings", { preHandler: access }, controller.updateSettings);
+
+  // Pay a supplier invoice from Finance
+  fastify.post("/payables/:id/pay", { preHandler: access }, controller.payPayable);
+
+  // Resync finance entries from source documents (repairs amount=0 entries)
+  fastify.post("/resync", { preHandler: access }, controller.resyncFinanceEntries);
 }
 
 module.exports = financeRoutes;

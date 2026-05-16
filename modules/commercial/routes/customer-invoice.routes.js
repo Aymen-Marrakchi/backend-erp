@@ -56,6 +56,22 @@ async function customerInvoiceRoutes(fastify) {
     { preHandler: financeWrite, schema: { params: idParam, body: clearChequePaymentBody } },
     controller.clearChequePayment
   );
+
+  fastify.get("/kumbil", { preHandler: financeWrite }, controller.getAllKumbilInvoices);
+
+  const installmentParam = {
+    type: "object",
+    required: ["id", "index"],
+    properties: {
+      id: { type: "string", minLength: 24, maxLength: 24 },
+      index: { type: "string", pattern: "^\\d+$" },
+    },
+  };
+  fastify.delete(
+    "/:id/installments/:index",
+    { preHandler: financeWrite, schema: { params: installmentParam } },
+    controller.cancelInstallment
+  );
 }
 
 module.exports = customerInvoiceRoutes;

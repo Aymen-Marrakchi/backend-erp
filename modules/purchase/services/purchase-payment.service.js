@@ -2,6 +2,7 @@ const PurchasePayment = require("../models/purchase-payment.model");
 const PurchaseInvoice = require("../models/purchase-invoice.model");
 const Supplier = require("../models/supplier.model");
 const financeService = require("../../finance/services/finance.service");
+const Notification = require("../../../models/Notification");
 
 async function generatePaymentNo() {
   const count = await PurchasePayment.countDocuments();
@@ -71,6 +72,15 @@ exports.createPurchasePayment = async ({
   invoice.status = invoice.amountPaid >= invoice.totalTtc ? "PAID" : "PARTIALLY_PAID";
   await invoice.save();
   await financeService.recordPurchasePayment({ payment, invoice });
+
+  Notification.create({
+    module: "FINANCE",
+    eventType: "PAYMENT_MADE",
+    title: `Paiement fournisseur — ${supplier.name}`,
+    message: `Paiement de ${amount.toFixed(3)} TND effectué sur la facture ${invoice.invoiceNo}. Statut: ${invoice.status === "PAID" ? "Soldée" : "Partiellement payée"}.`,
+    metadata: { supplierName: supplier.name, invoiceNo: invoice.invoiceNo, amount, method },
+    createdBy,
+  }).catch(() => {});
 
   return populatePayment(PurchasePayment.findById(payment._id));
 };
