@@ -5,7 +5,12 @@ const purchaseReturnLineSchema = new mongoose.Schema(
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "StockProduct",
-      required: true,
+      default: null,
+    },
+    description: {
+      type: String,
+      default: "",
+      trim: true,
     },
     purchaseReceiptLineId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -16,10 +21,20 @@ const purchaseReturnLineSchema = new mongoose.Schema(
       required: true,
       min: 1,
     },
-    lotRef: {
-      type: String,
-      default: "",
-      trim: true,
+    unitPrice: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    discountRate: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    vatRate: {
+      type: Number,
+      default: 19,
+      min: 0,
     },
   },
   { _id: true }
@@ -34,6 +49,17 @@ const purchaseReturnSchema = new mongoose.Schema(
       trim: true,
       uppercase: true,
     },
+    purchaseReceiptId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PurchaseReceipt",
+      required: true,
+      index: true,
+    },
+    purchaseOrderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PurchaseOrder",
+      default: null,
+    },
     supplierId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Supplier",
@@ -43,30 +69,28 @@ const purchaseReturnSchema = new mongoose.Schema(
     purchaseInvoiceId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "PurchaseInvoice",
-      required: true,
-      index: true,
-    },
-    purchaseReceiptId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "PurchaseReceipt",
-      required: true,
-      index: true,
+      default: null,
     },
     reason: {
       type: String,
-      enum: ["DEFECT", "DELIVERY_ERROR", "NON_CONFORMITY"],
       required: true,
+      trim: true,
     },
     lines: [purchaseReturnLineSchema],
-    refundAmount: {
+    totalHt: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalTtc: {
       type: Number,
       default: 0,
       min: 0,
     },
     status: {
       type: String,
-      enum: ["CREATED", "REFUNDED", "REPLACED", "CLOSED"],
-      default: "CREATED",
+      enum: ["DRAFT", "VALIDATED", "SENT", "CLOSED"],
+      default: "DRAFT",
       index: true,
     },
     notes: {
@@ -74,6 +98,9 @@ const purchaseReturnSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    validatedAt: { type: Date, default: null },
+    sentAt: { type: Date, default: null },
+    closedAt: { type: Date, default: null },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

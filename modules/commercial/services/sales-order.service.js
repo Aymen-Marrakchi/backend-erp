@@ -81,7 +81,7 @@ const populateOrder = (query) =>
     .populate("packingValidatedBy", "name email role")
     .populate("carrierId")
     .populate("vehicleId", "matricule capacityPackets capacityKg")
-    .populate("customerId", "name email phone company");
+    .populate("customerId", "name email phone company mf address");
 
 async function synchronizePreparationState(order) {
   if (!order) return order;
@@ -411,7 +411,7 @@ async function applyOrdonnancement(orders, payloads, userId) {
     }
 
     if (readyLines.length > 0 && waitingLines.length > 0) {
-      await SalesOrder.create({
+      const splitOrder = await SalesOrder.create({
         orderNo: await generateSplitOrderNo(order.orderNo),
         customerId: order.customerId || null,
         customerName: order.customerName,
@@ -425,6 +425,7 @@ async function applyOrdonnancement(orders, payloads, userId) {
         createdBy: userId,
         isUrgent: order.isUrgent || false,
       });
+      await devisService.createFromOrder(splitOrder._id, userId).catch(() => {});
     }
 
     const reservedItems = [];
@@ -475,6 +476,10 @@ async function applyOrdonnancement(orders, payloads, userId) {
       }
 
       await order.save();
+
+      if (readyLines.length > 0) {
+        await devisService.createFromOrder(order._id).catch(() => {});
+      }
     } catch (error) {
       for (const item of reservedItems) {
         try {
@@ -653,6 +658,8 @@ exports.confirmOrder = async (id, userId = null) => {
 
   order.status = "CONFIRMED";
   await order.save();
+
+  await devisService.createFromOrder(order._id, userId).catch(() => {});
 
   return exports.getOrderById(order._id);
 };

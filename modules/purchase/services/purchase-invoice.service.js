@@ -33,13 +33,13 @@ function buildInvoiceTaxConfig(settings, payload = {}) {
 
 function computeInvoiceTotals(subtotalHt, taxConfig) {
   const baseHt = roundAmount(Number(subtotalHt || 0));
-  const totalVat = roundAmount(
-    baseHt * (taxConfig.applyTva ? Number(taxConfig.tvaRate || 0) / 100 : 0)
-  );
   const totalFodec = roundAmount(
     baseHt * (taxConfig.applyFodec ? Number(taxConfig.fodecRate || 0) / 100 : 0)
   );
-  const totalBeforeStamp = roundAmount(baseHt + totalVat + totalFodec);
+  const totalVat = roundAmount(
+    (baseHt + totalFodec) * (taxConfig.applyTva ? Number(taxConfig.tvaRate || 0) / 100 : 0)
+  );
+  const totalBeforeStamp = roundAmount(baseHt + totalFodec + totalVat);
   const totalTtc = roundAmount(totalBeforeStamp + Number(taxConfig.timbreFiscal || 0));
 
   return {

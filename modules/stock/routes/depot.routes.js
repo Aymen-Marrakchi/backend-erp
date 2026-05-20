@@ -20,6 +20,12 @@ async function depotRoutes(fastify) {
   );
 
   fastify.get(
+    "/mine",
+    { preHandler: [protect, requireRole("ADMIN", "DEPOT_MANAGER", "STOCK_MANAGER")] },
+    depotController.getMyDepot
+  );
+
+  fastify.get(
     "/:id",
     { preHandler: stockReadAccess, schema: { params: idParam } },
     depotController.getDepotById

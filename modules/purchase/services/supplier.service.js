@@ -26,6 +26,8 @@ exports.createSupplier = async (payload) => {
     rating: typeof payload.rating === "number" ? payload.rating : 0,
     notes: payload.notes || "",
     blockedReason: payload.blockedReason || "",
+    priceHt: typeof payload.priceHt === "number" ? payload.priceHt : 0,
+    leadTimeDays: typeof payload.leadTimeDays === "number" ? payload.leadTimeDays : 0,
   });
 };
 
@@ -49,6 +51,8 @@ exports.updateSupplier = async (id, payload) => {
     rating: typeof payload.rating === "number" ? payload.rating : supplier.rating,
     notes: payload.notes ?? supplier.notes,
     blockedReason: payload.blockedReason ?? supplier.blockedReason,
+    priceHt: typeof payload.priceHt === "number" ? payload.priceHt : supplier.priceHt,
+    leadTimeDays: typeof payload.leadTimeDays === "number" ? payload.leadTimeDays : supplier.leadTimeDays,
   });
 
   await supplier.save();

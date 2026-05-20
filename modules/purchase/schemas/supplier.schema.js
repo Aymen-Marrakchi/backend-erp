@@ -18,6 +18,8 @@ const supplierBodyProperties = {
   rating: { type: "number", minimum: 0, maximum: 5 },
   notes: { type: "string" },
   blockedReason: { type: "string" },
+  priceHt: { type: "number", minimum: 0 },
+  leadTimeDays: { type: "number", minimum: 0 },
 };
 
 const createSupplierBody = {

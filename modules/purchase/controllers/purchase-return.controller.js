@@ -1,42 +1,54 @@
 const purchaseReturnService = require("../services/purchase-return.service");
 
-exports.getAllPurchaseReturns = async (req, reply) => {
+exports.getAllReturns = async (req, reply) => {
   try {
-    return reply.code(200).send(await purchaseReturnService.getAllPurchaseReturns());
+    return reply.code(200).send(await purchaseReturnService.getAllReturns());
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }
 };
 
-exports.getPurchaseReturnById = async (req, reply) => {
+exports.getReturnById = async (req, reply) => {
   try {
-    const purchaseReturn = await purchaseReturnService.getPurchaseReturnById(req.params.id);
-    if (!purchaseReturn) {
-      return reply.code(404).send({ message: "Purchase return not found" });
-    }
-    return reply.code(200).send(purchaseReturn);
+    const ret = await purchaseReturnService.getReturnById(req.params.id);
+    if (!ret) return reply.code(404).send({ message: "Purchase return not found" });
+    return reply.code(200).send(ret);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }
 };
 
-exports.createPurchaseReturn = async (req, reply) => {
+exports.getMyReturns = async (req, reply) => {
   try {
-    const purchaseReturn = await purchaseReturnService.createPurchaseReturn({
-      ...req.body,
+    return reply.code(200).send(await purchaseReturnService.getMyReturns(req.user?.id));
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.createReturn = async (req, reply) => {
+  try {
+    const ret = await purchaseReturnService.createReturn({
+      receiptId: req.body.receiptId,
+      reason: req.body.reason,
+      notes: req.body.notes || "",
       createdBy: req.user?.id || null,
     });
-    return reply.code(201).send(purchaseReturn);
+    return reply.code(201).send(ret);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }
 };
 
-exports.updatePurchaseReturnStatus = async (req, reply) => {
+exports.updateReturnStatus = async (req, reply) => {
   try {
-    return reply
-      .code(200)
-      .send(await purchaseReturnService.updatePurchaseReturnStatus(req.params.id, req.body.status));
+    const ret = await purchaseReturnService.updateReturnStatus(
+      req.params.id,
+      req.body.status,
+      req.user?.id || null,
+      req.user?.role || null
+    );
+    return reply.code(200).send(ret);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }

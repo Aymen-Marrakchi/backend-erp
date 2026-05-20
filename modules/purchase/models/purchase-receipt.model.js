@@ -9,7 +9,7 @@ const purchaseReceiptLineSchema = new mongoose.Schema(
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "StockProduct",
-      required: true,
+      default: null,
     },
     orderedQuantity: {
       type: Number,
@@ -73,7 +73,7 @@ const purchaseReceiptSchema = new mongoose.Schema(
     depotId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Depot",
-      required: true,
+      default: null,
     },
     lines: [purchaseReceiptLineSchema],
     receiptStatus: {
@@ -82,9 +82,20 @@ const purchaseReceiptSchema = new mongoose.Schema(
       required: true,
       default: "PARTIAL",
     },
+    supplierRating: {
+      type: Number,
+      default: null,
+      min: 1,
+      max: 5,
+    },
     notes: {
       type: String,
       default: "",
+      trim: true,
+    },
+    factureFile: {
+      type: String,
+      default: null,
       trim: true,
     },
     createdBy: {

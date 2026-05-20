@@ -1,21 +1,27 @@
 const { protect, requireRole } = require("../../../hooks/auth.hook");
 const controller = require("../controllers/purchase-return.controller");
-const {
-  idParam,
-  createPurchaseReturnBody,
-  updatePurchaseReturnStatusBody,
-} = require("../schemas/purchase-return.schema");
+const { idParam, createReturnBody, updateReturnStatusBody } = require("../schemas/purchase-return.schema");
 
 async function purchaseReturnRoutes(fastify) {
-  const access = [protect, requireRole("ADMIN", "PURCHASE_MANAGER")];
+  const adminAccess = [protect, requireRole("ADMIN", "PURCHASE_MANAGER", "FINANCE_MANAGER")];
+  const receiverAccess = [
+    protect,
+    requireRole("ADMIN", "DEPOT_MANAGER", "STOCK_MANAGER", "COMMERCIAL_MANAGER"),
+  ];
 
-  fastify.get("/", { preHandler: access }, controller.getAllPurchaseReturns);
-  fastify.get("/:id", { preHandler: access, schema: { params: idParam } }, controller.getPurchaseReturnById);
-  fastify.post("/", { preHandler: access, schema: { body: createPurchaseReturnBody } }, controller.createPurchaseReturn);
+  fastify.get("/", { preHandler: adminAccess }, controller.getAllReturns);
+  fastify.get("/mine", { preHandler: receiverAccess }, controller.getMyReturns);
+  fastify.get("/:id", { preHandler: adminAccess, schema: { params: idParam } }, controller.getReturnById);
+  fastify.post("/", { preHandler: receiverAccess, schema: { body: createReturnBody } }, controller.createReturn);
+  const statusAccess = [
+    protect,
+    requireRole("ADMIN", "PURCHASE_MANAGER", "DEPOT_MANAGER", "STOCK_MANAGER", "COMMERCIAL_MANAGER"),
+  ];
+
   fastify.patch(
     "/:id/status",
-    { preHandler: access, schema: { params: idParam, body: updatePurchaseReturnStatusBody } },
-    controller.updatePurchaseReturnStatus
+    { preHandler: statusAccess, schema: { params: idParam, body: updateReturnStatusBody } },
+    controller.updateReturnStatus
   );
 }
 

@@ -10,6 +10,15 @@ exports.getDepotManagers = async (req, reply) => {
   }
 };
 
+exports.getMyDepot = async (req, reply) => {
+  try {
+    const depot = await depotService.getMyDepot(req.user?.id);
+    return reply.code(200).send(depot || null);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
 exports.getAllDepots = async (req, reply) => {
   try {
     const depots = await depotService.getAllDepots();

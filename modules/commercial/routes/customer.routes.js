@@ -20,6 +20,7 @@ const customerBody = {
     continent: { type: "string" },
     country: { type: "string" },
     state: { type: "string" },
+    mf: { type: "string" },
     notes: { type: "string" },
   },
 };

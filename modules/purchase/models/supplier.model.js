@@ -57,6 +57,11 @@ const supplierSchema = new mongoose.Schema(
       min: 0,
       max: 5,
     },
+    ratingCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     notes: {
       type: String,
       default: "",
@@ -71,6 +76,16 @@ const supplierSchema = new mongoose.Schema(
       type: String,
       default: "",
       trim: true,
+    },
+    priceHt: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    leadTimeDays: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
   },
   { timestamps: true }

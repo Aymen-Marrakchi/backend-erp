@@ -32,6 +32,16 @@ exports.createTender = async (req, reply) => {
   }
 };
 
+exports.updateSuppliers = async (req, reply) => {
+  try {
+    return reply
+      .code(200)
+      .send(await tenderService.updateSuppliers(req.params.id, req.body.supplierIds || []));
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
 exports.sendTender = async (req, reply) => {
   try {
     return reply.code(200).send(await tenderService.sendTender(req.params.id));
@@ -48,11 +58,21 @@ exports.addOffer = async (req, reply) => {
   }
 };
 
+exports.createMissingPurchaseOrder = async (req, reply) => {
+  try {
+    return reply
+      .code(200)
+      .send(await tenderService.createMissingPurchaseOrder(req.params.id, req.user?.id || null));
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
 exports.selectOffer = async (req, reply) => {
   try {
     return reply
       .code(200)
-      .send(await tenderService.selectOffer(req.params.id, req.body.offerId));
+      .send(await tenderService.selectOffer(req.params.id, req.body.offerId, req.user?.id || null));
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }

@@ -24,7 +24,7 @@ const createFromAlertBody = {
 };
 
 async function purchaseRequestRoutes(fastify) {
-  const purchaseAccess = [protect, requireRole("ADMIN", "PURCHASE_MANAGER")];
+  const purchaseAccess = [protect, requireRole("ADMIN", "PURCHASE_MANAGER", "COMMERCIAL_MANAGER")];
   const stockToPurchaseAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER")];
 
   fastify.get("/", { preHandler: purchaseAccess }, controller.getAllPurchaseRequests);

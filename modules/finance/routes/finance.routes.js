@@ -30,8 +30,9 @@ async function financeRoutes(fastify) {
   // Retenue à la source
   fastify.get("/rs", { preHandler: access }, controller.getRsPayments);
 
-  // Calendar
-  fastify.get("/calendar", { preHandler: access }, controller.getCalendar);
+  // Calendar (also accessible by PURCHASE_MANAGER for outflow tracking)
+  const calendarAccess = [protect, requireRole("ADMIN", "FINANCE_MANAGER", "PURCHASE_MANAGER")];
+  fastify.get("/calendar", { preHandler: calendarAccess }, controller.getCalendar);
 
   // Company settings
   fastify.get("/settings", { preHandler: access }, controller.getSettings);

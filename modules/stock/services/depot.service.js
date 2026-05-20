@@ -26,6 +26,10 @@ exports.getAllDepots = async () => {
     .sort({ createdAt: -1 });
 };
 
+exports.getMyDepot = async (userId) => {
+  return Depot.findOne({ managerId: userId }).populate("managerId", "name email role department");
+};
+
 exports.getDepotById = async (id) => {
   return Depot.findById(id).populate("managerId", "name email role department");
 };

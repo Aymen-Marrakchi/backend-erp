@@ -8,6 +8,16 @@ exports.getAllPurchaseOrders = async (req, reply) => {
   }
 };
 
+exports.getPendingDeliveries = async (req, reply) => {
+  try {
+    return reply.code(200).send(
+      await purchaseOrderService.getPendingDeliveries(req.user?.role, req.user?.id)
+    );
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
 exports.getPurchaseOrderById = async (req, reply) => {
   try {
     const purchaseOrder = await purchaseOrderService.getPurchaseOrderById(req.params.id);
@@ -37,6 +47,14 @@ exports.updatePurchaseOrderStatus = async (req, reply) => {
     return reply
       .code(200)
       .send(await purchaseOrderService.updatePurchaseOrderStatus(req.params.id, req.body.status));
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
+exports.cancelPurchaseOrder = async (req, reply) => {
+  try {
+    return reply.code(200).send(await purchaseOrderService.cancelPurchaseOrder(req.params.id));
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }

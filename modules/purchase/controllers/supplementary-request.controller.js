@@ -27,6 +27,15 @@ exports.create = async (req, reply) => {
   }
 };
 
+exports.submit = async (req, reply) => {
+  try {
+    const data = await service.updateStatus(req.params.id, { status: "SUBMITTED" }, req.user?._id || null);
+    return reply.code(200).send(data);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
 exports.updateStatus = async (req, reply) => {
   try {
     const data = await service.updateStatus(req.params.id, req.body, req.user?._id || null);

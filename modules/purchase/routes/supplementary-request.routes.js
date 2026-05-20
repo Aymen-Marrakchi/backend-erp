@@ -12,10 +12,7 @@ const createBody = {
   required: ["title", "quantity", "department", "reason"],
   properties: {
     title: { type: "string", minLength: 2 },
-    category: {
-      type: "string",
-      enum: ["FOURNITURES", "INFORMATIQUE", "MOBILIER", "MAINTENANCE", "SERVICE", "AUTRE"],
-    },
+    category: { type: "string" },
     quantity: { type: "number", minimum: 1 },
     unit: { type: "string" },
     estimatedCost: { type: "number", minimum: 0 },
@@ -36,7 +33,7 @@ const updateStatusBody = {
 };
 
 async function supplementaryRequestRoutes(fastify) {
-  const access = [protect, requireRole("ADMIN", "STOCK_MANAGER", "PURCHASE_MANAGER")];
+  const access = [protect, requireRole("ADMIN", "STOCK_MANAGER", "COMMERCIAL_MANAGER", "PURCHASE_MANAGER")];
   const adminAccess = [protect, requireRole("ADMIN", "PURCHASE_MANAGER")];
 
   fastify.get("/", { preHandler: access }, controller.getAll);
@@ -45,6 +42,14 @@ async function supplementaryRequestRoutes(fastify) {
 
   fastify.post("/", { preHandler: access, schema: { body: createBody } }, controller.create);
 
+  // STOCK_MANAGER can submit their own draft requests (DRAFT → SUBMITTED only)
+  fastify.post(
+    "/:id/submit",
+    { preHandler: access, schema: { params: idParam } },
+    controller.submit
+  );
+
+  // ADMIN / PURCHASE_MANAGER can approve or reject
   fastify.patch(
     "/:id/status",
     { preHandler: adminAccess, schema: { params: idParam, body: updateStatusBody } },

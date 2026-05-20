@@ -47,7 +47,13 @@ const tenderSchema = new mongoose.Schema(
     purchaseRequestId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "PurchaseRequest",
-      required: true,
+      default: null,
+      index: true,
+    },
+    supplementaryRequestId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SupplementaryRequest",
+      default: null,
       index: true,
     },
     supplierIds: [
@@ -79,6 +85,11 @@ const tenderSchema = new mongoose.Schema(
     },
     awardedAt: {
       type: Date,
+      default: null,
+    },
+    purchaseOrderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PurchaseOrder",
       default: null,
     },
     createdBy: {

@@ -33,6 +33,12 @@ const productSchema = new mongoose.Schema(
       enum: ["ACTIVE", "INACTIVE"],
       default: "ACTIVE",
     },
+    category: {
+      type: String,
+      default: "",
+      trim: true,
+      uppercase: true,
+    },
     purchasePrice: {
       type: Number,
       default: 0,

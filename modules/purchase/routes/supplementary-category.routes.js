@@ -29,7 +29,7 @@ const updateBody = {
 };
 
 async function supplementaryCategoryRoutes(fastify) {
-  const readAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER", "PURCHASE_MANAGER")];
+  const readAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER", "PURCHASE_MANAGER", "COMMERCIAL_MANAGER")];
   const writeAccess = [protect, requireRole("ADMIN", "PURCHASE_MANAGER")];
 
   fastify.get("/", { preHandler: readAccess }, controller.getAll);

@@ -3,6 +3,7 @@ const PurchaseOrder = require("../models/purchase-order.model");
 const PurchaseInvoice = require("../models/purchase-invoice.model");
 const Depot = require("../../stock/models/depot.model");
 const StockProduct = require("../../stock/models/product.model");
+const Supplier = require("../models/supplier.model");
 const stockMovementService = require("../../stock/services/stock-movement.service");
 
 async function generateReceiptNo() {
@@ -27,13 +28,18 @@ const populateReceipt = (query) =>
 exports.getAllReceipts = async () =>
   populateReceipt(PurchaseReceipt.find()).sort({ createdAt: -1 });
 
+exports.getMyReceipts = async (userId) =>
+  populateReceipt(PurchaseReceipt.find({ createdBy: userId })).sort({ createdAt: -1 });
+
 exports.getReceiptById = async (id) => populateReceipt(PurchaseReceipt.findById(id));
 
 exports.createReceipt = async ({
   purchaseOrderId,
   depotId,
   lines = [],
+  supplierRating = null,
   notes = "",
+  factureFile = null,
   createdBy = null,
 }) => {
   const purchaseOrder = await PurchaseOrder.findById(purchaseOrderId).populate("supplierId");
@@ -51,9 +57,17 @@ exports.createReceipt = async ({
     throw Object.assign(new Error("Add at least one receipt line"), { statusCode: 400 });
   }
 
-  const depot = await Depot.findById(depotId).select("status productTypeScope name");
-  if (!depot || depot.status !== "ACTIVE") {
-    throw Object.assign(new Error("Selected depot is not available"), { statusCode: 400 });
+  const hasStockLines = purchaseOrder.lines.some((l) => l.productId);
+
+  let depot = null;
+  if (hasStockLines) {
+    if (!depotId) {
+      throw Object.assign(new Error("Depot is required for stock orders"), { statusCode: 400 });
+    }
+    depot = await Depot.findById(depotId).select("status productTypeScope name");
+    if (!depot || depot.status !== "ACTIVE") {
+      throw Object.assign(new Error("Selected depot is not available"), { statusCode: 400 });
+    }
   }
 
   const receiptLines = [];
@@ -82,7 +96,7 @@ exports.createReceipt = async ({
 
     poLine.receivedQuantity = (poLine.receivedQuantity || 0) + line.acceptedQuantity;
 
-    if (line.acceptedQuantity > 0) {
+    if (line.acceptedQuantity > 0 && poLine.productId) {
       const product = await StockProduct.findById(poLine.productId).select("type");
       if (!product) {
         throw Object.assign(new Error("Product not found"), { statusCode: 404 });
@@ -132,26 +146,37 @@ exports.createReceipt = async ({
     });
   }
 
-  const allReceived = purchaseOrder.lines.every(
-    (line) => (line.receivedQuantity || 0) >= line.quantity
-  );
-
-  purchaseOrder.status = allReceived ? "RECEIVED" : "SENT";
-  if (allReceived) {
-    purchaseOrder.receivedAt = new Date();
-  }
+  purchaseOrder.status = "RECEIVED";
+  purchaseOrder.receivedAt = new Date();
   await purchaseOrder.save();
 
   const receipt = await PurchaseReceipt.create({
     receiptNo: await generateReceiptNo(),
     purchaseOrderId: purchaseOrder._id,
     supplierId: purchaseOrder.supplierId._id,
-    depotId,
+    depotId: depotId || null,
     lines: receiptLines,
-    receiptStatus: hasRejected ? "LITIGATION" : allReceived ? "FULL" : "PARTIAL",
+    receiptStatus: hasRejected ? "LITIGATION" : "FULL",
+    supplierRating: supplierRating ?? null,
     notes,
+    factureFile: factureFile || null,
     createdBy,
   });
+
+  if (supplierRating && supplierRating >= 1 && supplierRating <= 5) {
+    const ratedReceipts = await PurchaseReceipt.find({
+      supplierId: purchaseOrder.supplierId._id,
+      supplierRating: { $gte: 1 },
+    }).select("supplierRating");
+
+    const count = ratedReceipts.length;
+    const avg = ratedReceipts.reduce((sum, r) => sum + r.supplierRating, 0) / count;
+
+    await Supplier.findByIdAndUpdate(purchaseOrder.supplierId._id, {
+      rating: Math.round(avg * 10) / 10,
+      ratingCount: count,
+    });
+  }
 
   // Auto-create a purchase invoice for this PO if none exists yet
   const existingInvoice = await PurchaseInvoice.findOne({ purchaseOrderId: purchaseOrder._id });

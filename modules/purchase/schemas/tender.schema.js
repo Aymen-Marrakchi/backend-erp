@@ -8,9 +8,9 @@ const idParam = {
 
 const createTenderBody = {
   type: "object",
-  required: ["purchaseRequestId"],
   properties: {
     purchaseRequestId: { type: "string", minLength: 24, maxLength: 24 },
+    supplementaryRequestId: { type: "string", minLength: 24, maxLength: 24 },
     supplierIds: {
       type: "array",
       items: { type: "string", minLength: 24, maxLength: 24 },

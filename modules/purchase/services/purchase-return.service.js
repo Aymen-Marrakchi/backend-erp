@@ -1,9 +1,8 @@
 const PurchaseReturn = require("../models/purchase-return.model");
 const PurchaseInvoice = require("../models/purchase-invoice.model");
 const PurchaseReceipt = require("../models/purchase-receipt.model");
-const Supplier = require("../models/supplier.model");
+const PurchaseOrder = require("../models/purchase-order.model");
 const stockMovementService = require("../../stock/services/stock-movement.service");
-const financeService = require("../../finance/services/finance.service");
 
 async function generateReturnNo() {
   const count = await PurchaseReturn.countDocuments();
@@ -15,143 +14,167 @@ const populateReturn = (query) =>
     .populate("supplierId", "supplierNo name")
     .populate("purchaseInvoiceId", "invoiceNo totalTtc creditNoteAmount")
     .populate("purchaseReceiptId", "receiptNo receiptStatus")
+    .populate("purchaseOrderId", "orderNo")
     .populate("lines.productId", "name sku")
     .populate("createdBy", "name email role");
 
-exports.getAllPurchaseReturns = async () =>
+exports.getAllReturns = async () =>
   populateReturn(PurchaseReturn.find()).sort({ createdAt: -1 });
 
-exports.getPurchaseReturnById = async (id) =>
+exports.getReturnById = async (id) =>
   populateReturn(PurchaseReturn.findById(id));
 
-exports.createPurchaseReturn = async ({
-  supplierId,
-  purchaseInvoiceId,
-  purchaseReceiptId,
-  reason,
-  lines = [],
-  refundAmount = 0,
-  notes = "",
-  createdBy = null,
-}) => {
-  if (!lines.length) {
-    throw Object.assign(new Error("Add at least one supplier return line"), { statusCode: 400 });
-  }
+exports.getMyReturns = async (userId) =>
+  populateReturn(PurchaseReturn.find({ createdBy: userId })).sort({ createdAt: -1 });
 
-  const supplier = await Supplier.findById(supplierId);
-  if (!supplier) {
-    throw Object.assign(new Error("Supplier not found"), { statusCode: 404 });
-  }
-
-  const invoice = await PurchaseInvoice.findById(purchaseInvoiceId);
-  if (!invoice) {
-    throw Object.assign(new Error("Purchase invoice not found"), { statusCode: 404 });
-  }
-
-  const receipt = await PurchaseReceipt.findById(purchaseReceiptId);
+exports.createReturn = async ({ receiptId, reason, notes = "", createdBy = null }) => {
+  const receipt = await PurchaseReceipt.findById(receiptId);
   if (!receipt) {
     throw Object.assign(new Error("Purchase receipt not found"), { statusCode: 404 });
   }
 
-  if (invoice.supplierId.toString() !== supplierId || receipt.supplierId.toString() !== supplierId) {
-    throw Object.assign(new Error("Supplier must match invoice and receipt"), {
-      statusCode: 400,
-    });
-  }
-
-  const existingReturns = await PurchaseReturn.find({
-    purchaseReceiptId,
-    status: { $in: ["CREATED", "REFUNDED", "REPLACED"] },
+  const existingActive = await PurchaseReturn.findOne({
+    purchaseReceiptId: receiptId,
+    status: { $in: ["DRAFT", "VALIDATED", "SENT"] },
   });
-
-  const returnedQtyByReceiptLine = new Map();
-  for (const existingReturn of existingReturns) {
-    for (const line of existingReturn.lines) {
-      const key = line.purchaseReceiptLineId.toString();
-      returnedQtyByReceiptLine.set(key, (returnedQtyByReceiptLine.get(key) || 0) + line.quantity);
-    }
+  if (existingActive) {
+    throw Object.assign(
+      new Error("An active return already exists for this receipt"),
+      { statusCode: 409 }
+    );
   }
 
-  const returnLines = [];
-  for (const line of lines) {
-    const receiptLine = receipt.lines.id(line.purchaseReceiptLineId);
-    if (!receiptLine) {
-      throw Object.assign(new Error("Receipt line not found"), { statusCode: 404 });
-    }
+  const purchaseOrder = await PurchaseOrder.findById(receipt.purchaseOrderId);
+  if (!purchaseOrder) {
+    throw Object.assign(new Error("Purchase order not found"), { statusCode: 404 });
+  }
 
-    const alreadyReturned = returnedQtyByReceiptLine.get(line.purchaseReceiptLineId) || 0;
-    const maxReturnable = receiptLine.acceptedQuantity - alreadyReturned;
-    if (line.quantity <= 0 || line.quantity > maxReturnable) {
-      throw Object.assign(
-        new Error(`Return quantity must be between 1 and ${maxReturnable}`),
-        { statusCode: 400 }
-      );
-    }
+  const poLineMap = new Map();
+  for (const poLine of purchaseOrder.lines) {
+    poLineMap.set(poLine._id.toString(), poLine);
+  }
 
-    await stockMovementService.createExit({
-      productId: receiptLine.productId,
-      quantity: line.quantity,
-      lotRef: line.lotRef || receiptLine.lotRef || "",
-      sourceModule: "PURCHASE",
-      sourceType: "PURCHASE_RETURN",
-      sourceId: purchaseReceiptId.toString(),
-      reference: receipt.receiptNo,
-      reason: "Supplier return stock deduction",
-      notes,
-      createdBy,
-    });
+  const lines = [];
+  let totalHt = 0;
+  let totalTtc = 0;
 
-    returnLines.push({
-      productId: receiptLine.productId,
+  for (const receiptLine of receipt.lines) {
+    const qty = receiptLine.acceptedQuantity || 0;
+    if (qty <= 0) continue;
+
+    const poLine = poLineMap.get(receiptLine.purchaseOrderLineId.toString());
+    const unitPrice = poLine?.unitPrice || 0;
+    const discountRate = poLine?.discountRate || 0;
+    const vatRate = poLine?.vatRate ?? 19;
+    const description = poLine?.description || "";
+
+    const lineHt = qty * unitPrice * (1 - discountRate / 100);
+    const lineTtc = lineHt * (1 + vatRate / 100);
+
+    totalHt += lineHt;
+    totalTtc += lineTtc;
+
+    lines.push({
+      productId: receiptLine.productId || null,
+      description,
       purchaseReceiptLineId: receiptLine._id,
-      quantity: line.quantity,
-      lotRef: line.lotRef || receiptLine.lotRef || "",
+      quantity: qty,
+      unitPrice,
+      discountRate,
+      vatRate,
     });
+  }
+
+  if (!lines.length) {
+    throw Object.assign(new Error("Receipt has no accepted lines to return"), { statusCode: 400 });
   }
 
   const purchaseReturn = await PurchaseReturn.create({
     returnNo: await generateReturnNo(),
-    supplierId,
-    purchaseInvoiceId,
-    purchaseReceiptId,
+    purchaseReceiptId: receipt._id,
+    purchaseOrderId: purchaseOrder._id,
+    supplierId: receipt.supplierId,
     reason,
-    lines: returnLines,
-    refundAmount,
+    lines,
+    totalHt: Math.round(totalHt * 1000) / 1000,
+    totalTtc: Math.round(totalTtc * 1000) / 1000,
     notes,
+    status: "DRAFT",
     createdBy,
   });
 
-  if (refundAmount > 0) {
-    invoice.creditNoteAmount = (invoice.creditNoteAmount || 0) + refundAmount;
-    await invoice.save();
-  }
-
-  await financeService.recordPurchaseReturnCredit({ purchaseReturn, invoice });
-
-  return exports.getPurchaseReturnById(purchaseReturn._id);
+  return exports.getReturnById(purchaseReturn._id);
 };
 
-exports.updatePurchaseReturnStatus = async (id, status) => {
+exports.updateReturnStatus = async (id, status, updatedBy = null, userRole = null) => {
   const purchaseReturn = await PurchaseReturn.findById(id);
   if (!purchaseReturn) {
     throw Object.assign(new Error("Purchase return not found"), { statusCode: 404 });
   }
 
   const allowedTransitions = {
-    CREATED: ["REFUNDED", "REPLACED", "CLOSED"],
-    REFUNDED: ["CLOSED"],
-    REPLACED: ["CLOSED"],
+    DRAFT: ["VALIDATED"],
+    VALIDATED: ["SENT"],
+    SENT: ["CLOSED"],
     CLOSED: [],
   };
 
   if (!allowedTransitions[purchaseReturn.status]?.includes(status)) {
     throw Object.assign(
-      new Error(`Cannot move purchase return from ${purchaseReturn.status} to ${status}`),
+      new Error(`Cannot move return from ${purchaseReturn.status} to ${status}`),
       { statusCode: 400 }
     );
   }
 
+  if (status === "VALIDATED" && !["ADMIN", "PURCHASE_MANAGER"].includes(userRole)) {
+    throw Object.assign(
+      new Error("Only a purchase manager can validate a return"),
+      { statusCode: 403 }
+    );
+  }
+
+  const now = new Date();
+
+  if (status === "VALIDATED") {
+    purchaseReturn.validatedAt = now;
+  }
+
+  if (status === "SENT") {
+    const receipt = await PurchaseReceipt.findById(purchaseReturn.purchaseReceiptId);
+
+    for (const line of purchaseReturn.lines) {
+      if (!line.productId) continue;
+      await stockMovementService.createExit({
+        productId: line.productId,
+        quantity: line.quantity,
+        sourceModule: "PURCHASE",
+        sourceType: "PURCHASE_RETURN",
+        sourceId: purchaseReturn._id.toString(),
+        reference: purchaseReturn.returnNo,
+        reason: `Return: ${purchaseReturn.reason}`,
+        notes: purchaseReturn.notes || "",
+        createdBy: updatedBy,
+      });
+    }
+
+    const invoice = await PurchaseInvoice.findOne({
+      purchaseOrderId: purchaseReturn.purchaseOrderId,
+    });
+    if (invoice) {
+      invoice.creditNoteAmount = (invoice.creditNoteAmount || 0) + purchaseReturn.totalTtc;
+      await invoice.save();
+      purchaseReturn.purchaseInvoiceId = invoice._id;
+    }
+
+    purchaseReturn.sentAt = now;
+  }
+
+  if (status === "CLOSED") {
+    purchaseReturn.closedAt = now;
+  }
+
   purchaseReturn.status = status;
   await purchaseReturn.save();
-  return exports.getPurchaseReturnById(purchaseReturn._id);
+
+  return exports.getReturnById(purchaseReturn._id);
 };

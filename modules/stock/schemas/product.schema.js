@@ -23,6 +23,7 @@ const createProductBody = {
     isLotTracked: { type: "boolean" },
     status: { type: "string", enum: ["ACTIVE", "INACTIVE"] },
     purchasePrice: { type: "number", minimum: 0 },
+    category: { type: "string" },
   },
 };
 
@@ -42,6 +43,7 @@ const updateProductBody = {
     isLotTracked: { type: "boolean" },
     status: { type: "string", enum: ["ACTIVE", "INACTIVE"] },
     purchasePrice: { type: "number", minimum: 0 },
+    category: { type: "string" },
   },
 };
 

@@ -29,6 +29,7 @@ const createReceiptBody = {
     purchaseOrderId: { type: "string", minLength: 24, maxLength: 24 },
     depotId: { type: "string", minLength: 24, maxLength: 24 },
     lines: { type: "array", minItems: 1, items: receiptLineSchema },
+    supplierRating: { type: "number", minimum: 1, maximum: 5 },
     notes: { type: "string" },
   },
 };
