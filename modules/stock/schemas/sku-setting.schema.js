@@ -23,8 +23,17 @@ const updateSkuSettingBody = {
   },
 };
 
+const patchCounterBody = {
+  type: "object",
+  required: ["counter"],
+  properties: {
+    counter: { type: "number", minimum: 0 },
+  },
+};
+
 module.exports = {
   idParam,
   createSkuSettingBody,
   updateSkuSettingBody,
+  patchCounterBody,
 };

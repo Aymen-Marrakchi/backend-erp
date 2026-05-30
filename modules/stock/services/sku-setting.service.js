@@ -41,6 +41,18 @@ exports.updateSkuSetting = async (id, { skuName, skuMax }) => {
   return existing;
 };
 
+exports.updateCounter = async (id, counter) => {
+  const existing = await SkuSetting.findById(id);
+  if (!existing) {
+    throw Object.assign(new Error("SKU setting not found"), { statusCode: 404 });
+  }
+  if (counter > existing.lastCounter) {
+    existing.lastCounter = counter;
+    await existing.save();
+  }
+  return existing;
+};
+
 exports.deleteSkuSetting = async (id) => {
   const existing = await SkuSetting.findById(id);
   if (!existing) {

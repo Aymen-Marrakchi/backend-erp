@@ -42,6 +42,15 @@ exports.updateSkuSetting = async (req, reply) => {
   }
 };
 
+exports.updateCounter = async (req, reply) => {
+  try {
+    const data = await skuSettingService.updateCounter(req.params.id, req.body.counter);
+    return reply.code(200).send(data);
+  } catch (err) {
+    return reply.code(err.statusCode || 500).send({ message: err.message });
+  }
+};
+
 exports.deleteSkuSetting = async (req, reply) => {
   try {
     const data = await skuSettingService.deleteSkuSetting(req.params.id);

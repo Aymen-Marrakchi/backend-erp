@@ -4,6 +4,7 @@ const {
   idParam,
   createSkuSettingBody,
   updateSkuSettingBody,
+  patchCounterBody,
 } = require("../schemas/sku-setting.schema");
 
 async function skuSettingRoutes(fastify) {
@@ -30,6 +31,15 @@ async function skuSettingRoutes(fastify) {
       schema: { params: idParam, body: updateSkuSettingBody },
     },
     controller.updateSkuSetting
+  );
+
+  fastify.patch(
+    "/:id/counter",
+    {
+      preHandler: stockManagerOnly,
+      schema: { params: idParam, body: patchCounterBody },
+    },
+    controller.updateCounter
   );
 
   fastify.delete(
