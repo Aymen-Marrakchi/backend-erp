@@ -56,12 +56,18 @@ exports.getAllStockItems = async () => {
     Product.find({ status: "ACTIVE" }),
   ]);
 
+  // Remove orphaned stock items (product was deleted)
+  const orphans = items.filter((i) => !i.productId);
+  if (orphans.length > 0) {
+    await StockItem.deleteMany({ _id: { $in: orphans.map((o) => o._id) } });
+  }
+  const validItems = items.filter((i) => i.productId);
+
   // Find products that have no stock item yet and create virtual entries
-  const coveredIds = new Set(items.map((i) => String(i.productId?._id || i.productId)));
+  const coveredIds = new Set(validItems.map((i) => String(i.productId._id)));
   const missing = products.filter((p) => !coveredIds.has(String(p._id)));
 
   if (missing.length > 0) {
-    // Persist them so future calls are faster
     const created = await StockItem.insertMany(
       missing.map((p) => ({
         productId: p._id,
@@ -71,14 +77,13 @@ exports.getAllStockItems = async () => {
         status: "ACTIVE",
       }))
     );
-    // Populate productId on new items
     const newItems = await StockItem.find({
       _id: { $in: created.map((c) => c._id) },
     }).populate("productId");
-    return [...items, ...newItems];
+    return [...validItems, ...newItems];
   }
 
-  return items;
+  return validItems;
 };
 
 exports.ensureEnoughAvailableStock = (stockItem, quantity) => {

@@ -58,6 +58,13 @@ const inventoryCountSchema = new mongoose.Schema(
     closedAt:  { type: Date, default: null },
     notes:     { type: String, default: "", trim: true },
 
+    // PERIODIC: explicit date range
+    dateDebut: { type: Date, default: null },
+    dateFin:   { type: Date, default: null },
+
+    // PERMANENT: fiscal year (e.g. 2025), only allowed once current date >= Jul 31 of that year
+    year: { type: Number, default: null },
+
     // Full history of rejections (stock manager rejects silently — no reason)
     rejectionHistory: { type: [rejectionEntrySchema], default: [] },
 

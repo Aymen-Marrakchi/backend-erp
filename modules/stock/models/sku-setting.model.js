@@ -18,6 +18,11 @@ const skuSettingSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    productType: {
+      type: String,
+      enum: ["PRODUIT_FINI", "SOUS_ENSEMBLE", "COMPOSANT", "MATIERE_PREMIERE"],
+      default: null,
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

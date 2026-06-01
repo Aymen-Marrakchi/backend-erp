@@ -93,6 +93,7 @@ exports.deleteProduct = async (id) => {
     throw Object.assign(new Error("Product not found"), { statusCode: 404 });
   }
 
+  await StockItem.deleteOne({ productId: product._id });
   await product.deleteOne();
   return { message: "Product deleted successfully" };
 };

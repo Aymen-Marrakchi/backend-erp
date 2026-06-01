@@ -55,8 +55,20 @@ exports.getInventoryLines = async (inventoryCountId) => {
 
 // ─── Stock Manager: Create & Build ───────────────────────────────────────────
 
-exports.createInventory = async ({ type, notes = "", startedBy = null, depotId = null }) => {
+exports.createInventory = async ({ type, notes = "", startedBy = null, depotId = null, dateDebut = null, dateFin = null, year = null }) => {
   if (!depotId) throw Object.assign(new Error("A depot must be selected"), { statusCode: 400 });
+
+  if (type === "PERIODIC") {
+    if (!dateDebut || !dateFin) throw Object.assign(new Error("Date début and date fin are required for a periodic inventory"), { statusCode: 400 });
+    if (new Date(dateFin) < new Date(dateDebut)) throw Object.assign(new Error("Date fin must be after date début"), { statusCode: 400 });
+  }
+
+  if (type === "PERMANENT") {
+    if (!year) throw Object.assign(new Error("Year is required for a permanent inventory"), { statusCode: 400 });
+    const cutoff = new Date(year, 6, 31); // July 31 of that year (month index 6)
+    if (new Date() < cutoff) throw Object.assign(new Error(`Permanent inventory for ${year} is not allowed before July 31, ${year}`), { statusCode: 400 });
+  }
+
   return InventoryCount.create({
     code: generateInventoryCode(),
     type,
@@ -65,6 +77,9 @@ exports.createInventory = async ({ type, notes = "", startedBy = null, depotId =
     startedAt: new Date(),
     notes,
     depotId,
+    dateDebut: dateDebut ? new Date(dateDebut) : null,
+    dateFin:   dateFin   ? new Date(dateFin)   : null,
+    year:      year      ? Number(year)         : null,
   });
 };
 

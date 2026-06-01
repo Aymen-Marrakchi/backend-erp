@@ -14,8 +14,13 @@ exports.getInventoryById = async (req, reply) => {
 exports.createInventory = async (req, reply) => {
   try {
     return success(reply, await inventoryService.createInventory({
-      type: req.body.type, notes: req.body.notes,
-      depotId: req.body.depotId || null, startedBy: req.user?.id || null,
+      type:      req.body.type,
+      notes:     req.body.notes,
+      depotId:   req.body.depotId   || null,
+      dateDebut: req.body.dateDebut || null,
+      dateFin:   req.body.dateFin   || null,
+      year:      req.body.year      || null,
+      startedBy: req.user?.id       || null,
     }), 201);
   } catch (err) { return error(reply, err.message, err.statusCode || 500); }
 };

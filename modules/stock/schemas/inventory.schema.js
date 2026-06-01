@@ -19,9 +19,12 @@ const createInventoryBody = {
   type: "object",
   required: ["type"],
   properties: {
-    type:    { type: "string", enum: ["PERIODIC", "PERMANENT"] },
-    notes:   { type: "string", default: "" },
-    depotId: { type: "string", minLength: 24, maxLength: 24 },
+    type:      { type: "string", enum: ["PERIODIC", "PERMANENT"] },
+    notes:     { type: "string", default: "" },
+    depotId:   { type: "string", minLength: 24, maxLength: 24 },
+    dateDebut: { type: "string", nullable: true },
+    dateFin:   { type: "string", nullable: true },
+    year:      { type: "number", nullable: true },
   },
 };
 
