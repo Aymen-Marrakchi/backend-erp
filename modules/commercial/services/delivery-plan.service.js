@@ -175,7 +175,7 @@ exports.startDelivery = async (id) => {
   return exports.getById(plan._id);
 };
 
-exports.complete = async (id) => {
+exports.complete = async (id, { distanceKm } = {}) => {
   const plan = await DeliveryPlan.findById(id);
   if (!plan) {
     throw Object.assign(new Error("Delivery plan not found"), {
@@ -220,6 +220,9 @@ exports.complete = async (id) => {
 
   plan.status = "COMPLETED";
   plan.completedAt = new Date();
+  if (distanceKm !== undefined && distanceKm !== null) {
+    plan.distanceKm = Number(distanceKm);
+  }
   await plan.save();
 
   return exports.getById(plan._id);

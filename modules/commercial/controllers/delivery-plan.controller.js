@@ -59,7 +59,9 @@ exports.startDelivery = async (req, reply) => {
 
 exports.complete = async (req, reply) => {
   try {
-    const plan = await deliveryPlanService.complete(req.params.id);
+    const plan = await deliveryPlanService.complete(req.params.id, {
+      distanceKm: req.body?.distanceKm ?? null,
+    });
     return reply.code(200).send(plan);
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });

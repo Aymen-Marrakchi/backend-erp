@@ -16,6 +16,7 @@ const fastify = Fastify({
       options: { colorize: true },
     },
   },
+  bodyLimit: 15 * 1024 * 1024, // 15 MB — needed for base64-encoded file uploads
 });
 
 // ── Plugins ────────────────────────────────────────────────
@@ -119,8 +120,17 @@ fastify.register(require("./modules/production/routes/cyclic-order.routes"), {
 fastify.register(require("./modules/commercial/routes/delivery-plan.routes"), {
   prefix: "/api/commercial/delivery-plans",
 });
+fastify.register(require("./modules/commercial/routes/commercial-setting.routes"), {
+  prefix: "/api/commercial/settings",
+});
+fastify.register(require("./modules/commercial/routes/commercial-document.routes"), {
+  prefix: "/api/commercial/documents",
+});
 fastify.register(require("./modules/stock/routes/sku-setting.routes"), {
   prefix: "/api/stock/settings/sku",
+});
+fastify.register(require("./modules/stock/routes/document.routes"), {
+  prefix: "/api/stock/documents",
 });
 fastify.register(require("./modules/purchase/routes/purchase-request.routes"), {
   prefix: "/api/purchase/requests",
@@ -152,6 +162,9 @@ fastify.register(require("./modules/purchase/routes/purchase-setting.routes"), {
 fastify.register(require("./modules/purchase/routes/purchase-scan.routes"), {
   prefix: "/api/purchase/scan",
 });
+fastify.register(require("./modules/purchase/routes/purchase-document.routes"), {
+  prefix: "/api/purchase/documents",
+});
 fastify.register(require("./modules/purchase/routes/supplementary-request.routes"), {
   prefix: "/api/purchase/supplementary",
 });
@@ -160,6 +173,9 @@ fastify.register(require("./modules/purchase/routes/supplementary-category.route
 });
 fastify.register(require("./modules/finance/routes/finance.routes"), {
   prefix: "/api/finance",
+});
+fastify.register(require("./modules/finance/routes/finance-document.routes"), {
+  prefix: "/api/finance/documents",
 });
 fastify.register(require("./modules/production/routes/work-center.routes"), {
   prefix: "/api/production/work-centers",

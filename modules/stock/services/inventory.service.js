@@ -69,7 +69,7 @@ exports.createInventory = async ({ type, notes = "", startedBy = null, depotId =
     if (new Date() < cutoff) throw Object.assign(new Error(`Permanent inventory for ${year} is not allowed before July 31, ${year}`), { statusCode: 400 });
   }
 
-  return InventoryCount.create({
+  const session = await InventoryCount.create({
     code: generateInventoryCode(),
     type,
     status: "IN_PROGRESS",
@@ -81,6 +81,26 @@ exports.createInventory = async ({ type, notes = "", startedBy = null, depotId =
     dateFin:   dateFin   ? new Date(dateFin)   : null,
     year:      year      ? Number(year)         : null,
   });
+
+  if (type === "PERMANENT") {
+    const activeProducts = await Product.find({ status: "ACTIVE" }).lean();
+    const stockItems = await StockItem.find({
+      productId: { $in: activeProducts.map((p) => p._id) },
+    }).lean();
+    const qtyMap = Object.fromEntries(stockItems.map((si) => [String(si.productId), si.quantityOnHand]));
+    const lines = activeProducts.map((p) => ({
+      inventoryCountId: session._id,
+      productId:        p._id,
+      systemQuantity:   qtyMap[String(p._id)] ?? 0,
+      countedQuantity:  0,
+      status:           "PENDING",
+      lotRef:           "",
+      notes:            "",
+    }));
+    if (lines.length > 0) await InventoryCountLine.insertMany(lines);
+  }
+
+  return session;
 };
 
 exports.addInventoryLine = async ({ inventoryCountId, productId, lotRef = "", notes = "", addedBy = null }) => {

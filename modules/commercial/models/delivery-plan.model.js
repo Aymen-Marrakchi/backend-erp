@@ -28,6 +28,7 @@ const deliveryPlanSchema = new mongoose.Schema(
     },
     startDate: { type: Date, default: null },
     fuelAddedLiters: { type: Number, default: 0, min: 0 },
+    distanceKm: { type: Number, default: null, min: 0 },
     orderIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "SalesOrder" }],
     status: {
       type: String,
