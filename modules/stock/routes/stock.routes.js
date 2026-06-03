@@ -13,7 +13,7 @@ const {
 async function stockRoutes(fastify) {
   const adminOnly = [protect, requireRole("ADMIN")];
   const stockAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER")];
-  const stockReadAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER", "COMMERCIAL_MANAGER")];
+  const stockReadAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER", "COMMERCIAL_MANAGER", "DEPOT_MANAGER")];
   const stockOrDepot = [protect, requireRole("ADMIN", "STOCK_MANAGER", "DEPOT_MANAGER")];
   const depotAccess = [protect, requireRole("ADMIN", "STOCK_MANAGER", "DEPOT_MANAGER")];
 
