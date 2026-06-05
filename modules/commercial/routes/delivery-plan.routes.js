@@ -20,6 +20,7 @@ const createBody = {
     startDate: { type: "string" },
     fuelAddedLiters: { type: "number", minimum: 0 },
     orderIds: { type: "array", items: { type: "string" } },
+    livreurName: { type: "string" },
     notes: { type: "string" },
     planType: { type: "string", enum: ["SHIPMENT", "DISCOVER"] },
   },

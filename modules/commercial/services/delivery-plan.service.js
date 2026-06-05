@@ -3,29 +3,43 @@ const SalesOrder = require("../models/sales-order.model");
 const Vehicle = require("../models/vehicle.model");
 const rmaService = require("./rma.service");
 const salesOrderService = require("./sales-order.service");
+const commercialSettingService = require("./commercial-setting.service");
+const financeService = require("../../finance/services/finance.service");
 
-async function generatePlanNo(planDate) {
-  const date = new Date(planDate);
-  if (Number.isNaN(date.getTime())) {
-    throw Object.assign(new Error("Invalid plan date"), { statusCode: 400 });
-  }
+async function generatePlanNo() {
+  const settings = await commercialSettingService.get();
+  const prefix  = (settings.planPrefix  || "PLAN").toUpperCase();
+  const padding = Number(settings.planPadding || 3);
 
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const year = String(date.getUTCFullYear());
-  const planSuffix = `${month}/${year}`;
-  const regex = new RegExp(`^PLAN-(\\d+)-${month}\\/${year}$`, "i");
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`^${escaped}-(\\d+)$`, "i");
 
-  const plans = await DeliveryPlan.find({
-    planNo: { $regex: regex },
-  }).select("planNo");
+  const plans = await DeliveryPlan.find({ planNo: { $regex: regex } }).select("planNo");
 
-  const maxSequence = plans.reduce((max, plan) => {
-    const match = String(plan.planNo || "").match(regex);
-    const sequence = match ? Number(match[1]) : 0;
-    return Math.max(max, sequence);
+  const max = plans.reduce((m, p) => {
+    const match = String(p.planNo || "").match(regex);
+    return match ? Math.max(m, Number(match[1])) : m;
   }, 0);
 
-  return `PLAN-${maxSequence + 1}-${planSuffix}`;
+  return `${prefix}-${String(max + 1).padStart(padding, "0")}`;
+}
+
+async function generateBLNo() {
+  const settings = await commercialSettingService.get();
+  const prefix  = (settings.blPrefix  || "BL").toUpperCase();
+  const padding = Number(settings.blPadding || 3);
+
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`^${escaped}-(\\d+)$`, "i");
+
+  const plans = await DeliveryPlan.find({ blNo: { $regex: regex } }).select("blNo");
+
+  const max = plans.reduce((m, p) => {
+    const match = String(p.blNo || "").match(regex);
+    return match ? Math.max(m, Number(match[1])) : m;
+  }, 0);
+
+  return `${prefix}-${String(max + 1).padStart(padding, "0")}`;
 }
 
 const populatePlan = (query) =>
@@ -136,10 +150,12 @@ exports.create = async ({
     }
   }
 
-  const planNo = await generatePlanNo(planDate);
+  const planNo = await generatePlanNo();
+  const blNo   = await generateBLNo();
 
   const plan = await DeliveryPlan.create({
     planNo,
+    blNo,
     planDate,
     vehicleId: normalizedPlanType === "SHIPMENT" ? vehicleId : null,
     carrierId: normalizedPlanType === "SHIPMENT" ? carrierId : null,
@@ -224,6 +240,21 @@ exports.complete = async (id, { distanceKm } = {}) => {
     plan.distanceKm = Number(distanceKm);
   }
   await plan.save();
+
+  // Record fuel as a finance expense if fuel was added
+  if (Number(plan.fuelAddedLiters || 0) > 0 && plan.vehicleId) {
+    try {
+      const vehicle  = await Vehicle.findById(plan.vehicleId).select("fuelType");
+      const settings = await commercialSettingService.get();
+      const fuelTypes = settings.fuelTypes || [];
+      const match = fuelTypes.find((ft) => ft.name === vehicle?.fuelType);
+      if (match && Number(match.pricePerLiter || 0) > 0) {
+        await financeService.recordFuelExpense(plan, match.pricePerLiter, match.name);
+      }
+    } catch (e) {
+      console.error("[delivery-plan] fuel expense recording failed:", e.message);
+    }
+  }
 
   return exports.getById(plan._id);
 };

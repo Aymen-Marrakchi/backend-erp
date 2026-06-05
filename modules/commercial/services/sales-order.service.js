@@ -12,6 +12,7 @@ const RMA = require("../models/rma.model");
 const customerInvoiceService = require("./customer-invoice.service");
 const devisService = require("./devis.service");
 const customerService = require("./customer.service");
+const commercialSettingService = require("./commercial-setting.service");
 
 function addDays(date, days) {
   const next = new Date(date);
@@ -47,15 +48,18 @@ async function suggestedTransitDays() {
 }
 
 async function generateNextOrderNo() {
-  const orders = await SalesOrder.find({ orderNo: /^ORD-\d{3,}$/ })
-    .select("orderNo")
-    .lean();
-  const maxNumber = orders.reduce((max, order) => {
-    const match = String(order.orderNo || "").match(/^ORD-(\d+)$/);
-    if (!match) return max;
-    return Math.max(max, Number(match[1]));
+  const settings = await commercialSettingService.get();
+  const prefix  = (settings.orderPrefix  || "ORD").toUpperCase();
+  const padding = Number(settings.orderPadding || 3);
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`^${escaped}-(\\d+)$`);
+
+  const orders = await SalesOrder.find({ orderNo: { $regex: regex } }).select("orderNo").lean();
+  const max = orders.reduce((m, o) => {
+    const match = String(o.orderNo || "").match(regex);
+    return match ? Math.max(m, Number(match[1])) : m;
   }, 0);
-  return `ORD-${String(maxNumber + 1).padStart(3, "0")}`;
+  return `${prefix}-${String(max + 1).padStart(padding, "0")}`;
 }
 
 async function generateSplitOrderNo(baseOrderNo) {
@@ -410,8 +414,14 @@ async function applyOrdonnancement(orders, payloads, userId) {
       }
     }
 
+    // Only the root order gets a devis. Split orders (ORD-002/1, etc.) never get one.
+    // Call this BEFORE lines are modified so the devis captures the full original quantities.
+    if (readyLines.length > 0 && !order.splitFromOrderId) {
+      await devisService.createFromOrder(order._id, userId).catch(() => {});
+    }
+
     if (readyLines.length > 0 && waitingLines.length > 0) {
-      const splitOrder = await SalesOrder.create({
+      await SalesOrder.create({
         orderNo: await generateSplitOrderNo(order.orderNo),
         customerId: order.customerId || null,
         customerName: order.customerName,
@@ -425,7 +435,6 @@ async function applyOrdonnancement(orders, payloads, userId) {
         createdBy: userId,
         isUrgent: order.isUrgent || false,
       });
-      await devisService.createFromOrder(splitOrder._id, userId).catch(() => {});
     }
 
     const reservedItems = [];
@@ -476,10 +485,6 @@ async function applyOrdonnancement(orders, payloads, userId) {
       }
 
       await order.save();
-
-      if (readyLines.length > 0) {
-        await devisService.createFromOrder(order._id).catch(() => {});
-      }
     } catch (error) {
       for (const item of reservedItems) {
         try {

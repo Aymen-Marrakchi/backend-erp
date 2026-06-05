@@ -34,7 +34,7 @@ async function generateChequeReference() {
 const populateInvoice = (query) =>
   query
     .populate("salesOrderId", "orderNo status promisedDate shippedAt deliveredAt closedAt trackingNumber")
-    .populate("customerId", "name email company mf address")
+    .populate("customerId", "name email mf address")
     .populate("lines.productId", "name sku")
     .populate("createdBy", "name email role");
 

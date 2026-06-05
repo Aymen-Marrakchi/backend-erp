@@ -9,6 +9,12 @@ const deliveryPlanSchema = new mongoose.Schema(
       trim: true,
       uppercase: true,
     },
+    blNo: {
+      type: String,
+      default: "",
+      trim: true,
+      uppercase: true,
+    },
     planDate: { type: Date, required: true },
     carrierId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -35,6 +41,7 @@ const deliveryPlanSchema = new mongoose.Schema(
       enum: ["PLANNED", "IN_PROGRESS", "COMPLETED", "RETURNED", "CANCELLED"],
       default: "PLANNED",
     },
+    livreurName: { type: String, default: "", trim: true },
     notes: { type: String, default: "", trim: true },
     startedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },

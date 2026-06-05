@@ -6,10 +6,18 @@ exports.getAll = () => Vehicle.find().sort({ createdAt: -1 });
 exports.getActive = () => Vehicle.find({ active: true }).sort({ matricule: 1 });
 exports.getById = (id) => Vehicle.findById(id);
 
-exports.create = async ({ matricule, capacityKg, capacityPackets, purchaseDate, lifeExpectancyDays, notes }) => {
+function calcDurabilityFromPurchaseDate(purchaseDate) {
+  const ageDays = (Date.now() - new Date(purchaseDate).getTime()) / 86_400_000;
+  if (ageDays < 365) return 50;
+  if (ageDays <= 4 * 365) return 100;
+  return Math.max(0, 100 - 0.07 * (ageDays - 4 * 365));
+}
+
+exports.create = async ({ matricule, capacityKg, capacityPackets, purchaseDate, fuelType, fuelCapacityLiters, notes }) => {
   const exists = await Vehicle.findOne({ matricule: matricule.trim().toUpperCase() });
   if (exists) throw Object.assign(new Error("Matricule already exists"), { statusCode: 409 });
-  return Vehicle.create({ matricule, capacityKg, capacityPackets, purchaseDate, lifeExpectancyDays, notes });
+  const durabilityPercent = calcDurabilityFromPurchaseDate(purchaseDate);
+  return Vehicle.create({ matricule, capacityKg, capacityPackets, purchaseDate, fuelType, fuelCapacityLiters, durabilityPercent, notes });
 };
 
 exports.update = (id, data) =>
@@ -41,7 +49,9 @@ exports.getDeliveries = async (id) => {
       planDate: plan.planDate,
       status: plan.status,
       zone: plan.zone || "",
+      livreurName: plan.livreurName || "",
       fuelAddedLiters: Number(plan.fuelAddedLiters || 0),
+      distanceKm: plan.distanceKm ?? null,
       orderIds: (plan.orderIds || []).map((order) => ({
         _id: String(order._id),
         orderNo: order.orderNo,

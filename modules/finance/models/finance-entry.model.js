@@ -11,6 +11,7 @@ const financeEntrySchema = new mongoose.Schema(
         "INVOICE_ISSUED",
         "REGLEMENT_RECU",
         "MANUAL_ENTRY",
+        "FUEL_EXPENSE",
       ],
       required: true,
       index: true,

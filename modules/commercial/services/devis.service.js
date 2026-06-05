@@ -128,7 +128,7 @@ function buildLine(line, config) {
 const populateDevis = (query) =>
   query
     .populate("salesOrderId", "orderNo status promisedDate")
-    .populate("customerId", "name email company mf address")
+    .populate("customerId", "name email mf address")
     .populate("lines.productId", "name sku")
     .populate("createdBy", "name email role");
 
@@ -144,6 +144,9 @@ exports.getDevisByOrderId = async (orderId) =>
 exports.createFromOrder = async (orderId, userId = null) => {
   const order = await SalesOrder.findById(orderId).populate("lines.productId customerId");
   if (!order) throw Object.assign(new Error("Sales order not found"), { statusCode: 404 });
+
+  // Split orders (ORD-002/1, etc.) never get their own devis.
+  if (order.splitFromOrderId) return null;
 
   const settings = await purchaseSettingService.getSettings();
   const taxDefaults = buildTaxDefaults(settings);

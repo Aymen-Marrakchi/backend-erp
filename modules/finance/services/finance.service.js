@@ -93,6 +93,11 @@ function getAccountingLines(entry) {
         { accountCode: "401", accountName: "Fournisseurs", side: "DEBIT", amount },
         { accountCode: "609", accountName: "Avoirs fournisseurs", side: "CREDIT", amount },
       ];
+    case "FUEL_EXPENSE":
+      return [
+        { accountCode: "6162", accountName: "Carburants et lubrifiants", side: "DEBIT", amount },
+        { accountCode: "531", accountName: "Caisse", side: "CREDIT", amount },
+      ];
     default:
       return [];
   }
@@ -376,6 +381,32 @@ exports.recordPurchaseReturnCredit = async ({ purchaseReturn, invoice }) => {
     payableEntry.status = remaining > 0 ? "OPEN" : "SETTLED";
     await payableEntry.save();
   }
+};
+
+// ─── Fuel expense (triggered on delivery plan completion) ─────────────────────
+
+exports.recordFuelExpense = async (plan, pricePerLiter, fuelTypeName = "") => {
+  const liters = Number(plan.fuelAddedLiters || 0);
+  const price  = Number(pricePerLiter || 0);
+  if (liters <= 0 || price <= 0) return null;
+
+  const amount = roundAmount(liters * price);
+
+  await upsertEntry("DELIVERY_FUEL", plan._id, {
+    entryType:        "FUEL_EXPENSE",
+    direction:        "OUTFLOW",
+    sourceModule:     "COMMERCIAL",
+    reference:        plan.planNo || "",
+    counterpartyType: "INTERNAL",
+    counterpartyName: fuelTypeName ? `Carburant (${fuelTypeName})` : "Carburant livraison",
+    amount,
+    status:           "SETTLED",
+    occurredAt:       plan.completedAt || new Date(),
+    notes:            `${liters} L × ${price} TND/L — Plan ${plan.planNo}`,
+    metadata:         { liters, pricePerLiter: price, fuelType: fuelTypeName, planNo: plan.planNo },
+  });
+
+  return amount;
 };
 
 // ─── Resync ───────────────────────────────────────────────────────────────────

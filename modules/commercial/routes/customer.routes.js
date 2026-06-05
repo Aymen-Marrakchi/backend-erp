@@ -14,7 +14,6 @@ const customerBody = {
     name: { type: "string", minLength: 1 },
     email: { type: "string" },
     phone: { type: "string" },
-    company: { type: "string" },
     address: { type: "string" },
     city: { type: "string" },
     continent: { type: "string" },
