@@ -2,6 +2,8 @@ const Devis = require("../models/devis.model");
 const CustomerInvoice = require("../models/customer-invoice.model");
 const SalesOrder = require("../models/sales-order.model");
 const purchaseSettingService = require("../../purchase/services/purchase-setting.service");
+const financeService = require("../../finance/services/finance.service");
+const Notification = require("../../../models/Notification");
 
 // Migration: move existing QUOTATION-stage CustomerInvoice docs to Devis collection
 (async () => {
@@ -78,12 +80,17 @@ async function generateDevisNo() {
 }
 
 async function generateInvoiceNo() {
-  const docs = await CustomerInvoice.find({ invoiceNo: /^FC-\d+$/ }).select("invoiceNo").lean();
+  const docs = await CustomerInvoice.find({ invoiceNo: /^FC-\d+/ }).select("invoiceNo").lean();
   const max = docs.reduce((m, d) => {
-    const n = parseInt((d.invoiceNo || "").replace("FC-", ""), 10);
+    const match = String(d.invoiceNo || "").match(/^FC-(\d+)/);
+    const n = match ? parseInt(match[1], 10) : NaN;
     return isNaN(n) ? m : Math.max(m, n);
   }, 0);
-  return `FC-${String(max + 1).padStart(4, "0")}`;
+  const now = new Date();
+  const dd   = String(now.getDate()).padStart(2, "0");
+  const mm   = String(now.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(now.getFullYear());
+  return `FC-${String(max + 1).padStart(4, "0")}/${dd}${mm}${yyyy}`;
 }
 
 function buildTaxDefaults(settings) {
@@ -97,6 +104,7 @@ function buildTaxDefaults(settings) {
 function buildLine(line, config) {
   const quantity = Number(line.quantity || 0);
   const inputUnitPrice = roundAmount(Number(line.unitPrice || 0));
+  const discount = Math.min(100, Math.max(0, Number(line.discount || 0)));
   const tvaRate = config.applyTva ? Number(config.tvaRate || 0) : 0;
   const fodecRate = config.applyFodec ? Number(config.fodecRate || 0) : 0;
   const multiplier = 1 + tvaRate / 100 + fodecRate / 100;
@@ -104,12 +112,14 @@ function buildLine(line, config) {
     config.pricingMode === "TTC_BASED"
       ? roundAmount(multiplier > 0 ? inputUnitPrice / multiplier : inputUnitPrice)
       : inputUnitPrice;
-  const subtotalHt = roundAmount(baseUnitHt * quantity);
+  const brutHt = roundAmount(baseUnitHt * quantity);
+  const discountAmount = roundAmount(brutHt * discount / 100);
+  const subtotalHt = roundAmount(brutHt - discountAmount);
   const totalVat = roundAmount(subtotalHt * (tvaRate / 100));
   const totalFodec = roundAmount(subtotalHt * (fodecRate / 100));
   const totalBeforeStamp =
     config.pricingMode === "TTC_BASED"
-      ? roundAmount(inputUnitPrice * quantity)
+      ? roundAmount(inputUnitPrice * quantity * (1 - discount / 100))
       : roundAmount(subtotalHt + totalVat + totalFodec);
 
   return {
@@ -118,6 +128,8 @@ function buildLine(line, config) {
     quantity,
     inputUnitPrice,
     baseUnitHt,
+    discount,
+    discountAmount,
     subtotalHt,
     totalVat,
     totalFodec,
@@ -167,6 +179,7 @@ exports.createFromOrder = async (orderId, userId = null) => {
         productId: line.productId?._id || line.productId,
         quantity: line.quantity,
         unitPrice: line.unitPrice || 0,
+        discount: line.discount || 0,
         description: line.productId?.name || "",
       },
       lineConfig
@@ -234,6 +247,22 @@ exports.acceptDevis = async (id) => {
   devis.status = "ACCEPTED";
   devis.acceptedAt = new Date();
   await devis.save();
+
+  // Notify finance that a devis has been accepted (awaiting invoice & payment)
+  const total = Number(devis.totalTtc || 0);
+  Notification.create({
+    module: "FINANCE",
+    eventType: "DEVIS_ACCEPTED",
+    title: `Devis à régler : ${devis.devisNo}`,
+    message: `Le devis ${devis.devisNo} (${total.toFixed(3)} TND) a été accepté par ${devis.customerName || "le client"} — en attente de règlement.`,
+    metadata: {
+      devisNo: devis.devisNo,
+      devisId: String(devis._id),
+      customerName: devis.customerName,
+      amount: total,
+    },
+  }).catch(() => {});
+
   return exports.getDevisById(devis._id);
 };
 
@@ -287,6 +316,8 @@ exports.createInvoiceFromDevis = async (orderId) => {
       quantity: l.quantity,
       inputUnitPrice: l.inputUnitPrice,
       baseUnitHt: l.baseUnitHt,
+      discount: l.discount || 0,
+      discountAmount: l.discountAmount || 0,
       subtotalHt: l.subtotalHt,
       totalVat: l.totalVat,
       totalFodec: l.totalFodec,
@@ -299,6 +330,15 @@ exports.createInvoiceFromDevis = async (orderId) => {
     totalTtc: devis.totalTtc,
     notes: devis.notes || "",
     createdBy: devis.createdBy || null,
+    // Auto-finalize so the invoice is immediately recognized in finance
+    // (receivables, journal, income, règlement)
+    finalizedAt: new Date(),
+  });
+
+  // Push the invoice into finance entries (INVOICE_ISSUED) so it shows up
+  // in règlement / journal / KPIs as income
+  await financeService.recordInvoiceIssued(invoice).catch((e) => {
+    console.error("[devis] recordInvoiceIssued failed:", e.message);
   });
 
   return invoice;

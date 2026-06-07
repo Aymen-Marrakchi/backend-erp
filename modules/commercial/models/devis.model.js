@@ -7,6 +7,8 @@ const devisLineSchema = new mongoose.Schema(
     quantity: { type: Number, required: true, min: 1 },
     inputUnitPrice: { type: Number, required: true, min: 0 },
     baseUnitHt: { type: Number, default: 0, min: 0 },
+    discount: { type: Number, default: 0, min: 0, max: 100 },
+    discountAmount: { type: Number, default: 0, min: 0 },
     subtotalHt: { type: Number, default: 0, min: 0 },
     totalVat: { type: Number, default: 0, min: 0 },
     totalFodec: { type: Number, default: 0, min: 0 },

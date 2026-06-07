@@ -87,6 +87,15 @@ const supplierSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    productIds: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "StockProduct",
+    }],
+    productPrices: [{
+      _id: false,
+      productId: { type: mongoose.Schema.Types.ObjectId, ref: "StockProduct", required: true },
+      priceHt: { type: Number, default: 0, min: 0 },
+    }],
   },
   { timestamps: true }
 );

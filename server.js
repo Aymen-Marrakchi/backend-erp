@@ -171,6 +171,9 @@ fastify.register(require("./modules/purchase/routes/supplementary-request.routes
 fastify.register(require("./modules/purchase/routes/supplementary-category.routes"), {
   prefix: "/api/purchase/supplementary/categories",
 });
+fastify.register(require("./modules/purchase/routes/purchase-product-category.routes"), {
+  prefix: "/api/purchase/product-categories",
+});
 fastify.register(require("./modules/finance/routes/finance.routes"), {
   prefix: "/api/finance",
 });

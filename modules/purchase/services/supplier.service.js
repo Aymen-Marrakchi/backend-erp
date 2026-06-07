@@ -53,6 +53,15 @@ exports.updateSupplier = async (id, payload) => {
     blockedReason: payload.blockedReason ?? supplier.blockedReason,
     priceHt: typeof payload.priceHt === "number" ? payload.priceHt : supplier.priceHt,
     leadTimeDays: typeof payload.leadTimeDays === "number" ? payload.leadTimeDays : supplier.leadTimeDays,
+    productIds: Array.isArray(payload.productIds) ? payload.productIds : supplier.productIds,
+    productPrices: Array.isArray(payload.productPrices)
+      ? payload.productPrices
+          .filter((p) => p && p.productId)
+          .map((p) => ({
+            productId: p.productId,
+            priceHt: Math.max(0, Number(p.priceHt) || 0),
+          }))
+      : supplier.productPrices,
   });
 
   await supplier.save();

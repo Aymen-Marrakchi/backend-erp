@@ -2,7 +2,8 @@ const financeService = require("../services/finance.service");
 
 exports.getDashboard = async (req, reply) => {
   try {
-    return reply.code(200).send(await financeService.getDashboard());
+    const year = req.query?.year ? Number(req.query.year) : undefined;
+    return reply.code(200).send(await financeService.getDashboard(year));
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }
@@ -50,7 +51,8 @@ exports.getJournal = async (req, reply) => {
 
 exports.getAccounts = async (req, reply) => {
   try {
-    return reply.code(200).send(await financeService.getAccounts());
+    const { year, month } = req.query || {};
+    return reply.code(200).send(await financeService.getAccounts({ year, month }));
   } catch (err) {
     return reply.code(err.statusCode || 500).send({ message: err.message });
   }

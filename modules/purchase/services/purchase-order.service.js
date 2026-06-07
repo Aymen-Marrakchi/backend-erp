@@ -142,15 +142,28 @@ exports.createPurchaseOrder = async ({
 
     if (!resolvedLines.length) {
       const selectedOffer = tender.offers.find((offer) => offer.status === "SELECTED");
+      // Fetch the awarded supplier to look up the per-product price
+      const awardedSupplier = await Supplier.findById(tender.selectedSupplierId._id);
 
       if (tender.purchaseRequestId) {
         resolvedDepartment = tender.purchaseRequestId.department || "STOCK";
+        const productIdRef = tender.purchaseRequestId.productId._id;
+        // Priority: 1) supplier's per-product price, 2) selected offer amount, 3) 0
+        let resolvedUnitPrice = 0;
+        const productPriceEntry = (awardedSupplier?.productPrices || []).find(
+          (p) => String(p.productId) === String(productIdRef)
+        );
+        if (productPriceEntry && Number(productPriceEntry.priceHt) > 0) {
+          resolvedUnitPrice = Number(productPriceEntry.priceHt);
+        } else if (selectedOffer && Number(selectedOffer.amountHt) > 0) {
+          resolvedUnitPrice = Number(selectedOffer.amountHt);
+        }
         resolvedLines = [
           {
-            productId: tender.purchaseRequestId.productId._id,
+            productId: productIdRef,
             description: tender.purchaseRequestId.reason,
             quantity: tender.purchaseRequestId.requestedQuantity || 1,
-            unitPrice: selectedOffer ? selectedOffer.amountHt : 0,
+            unitPrice: resolvedUnitPrice,
             discountRate: 0,
             vatRate: settings.defaultVatRate,
           },

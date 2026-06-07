@@ -20,6 +20,21 @@ const supplierBodyProperties = {
   blockedReason: { type: "string" },
   priceHt: { type: "number", minimum: 0 },
   leadTimeDays: { type: "number", minimum: 0 },
+  productIds: {
+    type: "array",
+    items: { type: "string", minLength: 24, maxLength: 24 },
+  },
+  productPrices: {
+    type: "array",
+    items: {
+      type: "object",
+      required: ["productId"],
+      properties: {
+        productId: { type: "string", minLength: 24, maxLength: 24 },
+        priceHt: { type: "number", minimum: 0 },
+      },
+    },
+  },
 };
 
 const createSupplierBody = {

@@ -4,6 +4,7 @@ const CompanySettings = require("../models/company-settings.model");
 const PurchaseInvoice = require("../../purchase/models/purchase-invoice.model");
 const PurchasePayment = require("../../purchase/models/purchase-payment.model");
 const CustomerInvoice = require("../../commercial/models/customer-invoice.model");
+const Notification = require("../../../models/Notification");
 const User = require("../../../models/User");
 
 function roundAmount(value) {
@@ -103,6 +104,18 @@ function getAccountingLines(entry) {
   }
 }
 
+// Determine cash-flow direction for a manual journal entry:
+// DR cash/bank (5xx) → INFLOW; CR cash/bank → OUTFLOW; otherwise NONE
+function inferManualDirection(lines = []) {
+  for (const l of lines) {
+    const code = String(l.accountCode || "");
+    if (code.startsWith("5")) {
+      return l.side === "DEBIT" ? "INFLOW" : "OUTFLOW";
+    }
+  }
+  return "NONE";
+}
+
 function toJournalEntry(entry) {
   return {
     _id: String(entry._id),
@@ -112,6 +125,7 @@ function toJournalEntry(entry) {
     entryType: entry.entryType,
     sourceModule: entry.sourceModule,
     counterpartyName: entry.counterpartyName,
+    direction: entry.direction || "NONE",
     occurredAt: entry.occurredAt,
     notes: entry.notes,
     currency: entry.currency,
@@ -120,6 +134,12 @@ function toJournalEntry(entry) {
 }
 
 function toManualJournalEntry(entry) {
+  const mappedLines = (entry.lines || []).map((l) => ({
+    accountCode: l.accountCode,
+    accountName: l.accountName,
+    side: l.side,
+    amount: roundAmount(Number(l.amount || 0)),
+  }));
   return {
     _id: String(entry._id),
     sourceType: "MANUAL",
@@ -128,15 +148,11 @@ function toManualJournalEntry(entry) {
     entryType: "MANUAL_ENTRY",
     sourceModule: "FINANCE",
     counterpartyName: "",
+    direction: inferManualDirection(mappedLines),
     occurredAt: entry.occurredAt,
     notes: entry.description || "",
     currency: "TND",
-    lines: (entry.lines || []).map((l) => ({
-      accountCode: l.accountCode,
-      accountName: l.accountName,
-      side: l.side,
-      amount: roundAmount(Number(l.amount || 0)),
-    })),
+    lines: mappedLines,
   };
 }
 
@@ -151,6 +167,9 @@ function buildAccountSummaries(journalEntries = []) {
         debit: 0,
         credit: 0,
         balance: 0,
+        inflow: 0,
+        outflow: 0,
+        netFlow: 0,
         entries: [],
       };
 
@@ -162,6 +181,16 @@ function buildAccountSummaries(journalEntries = []) {
         current.balance = roundAmount(current.balance - line.amount);
       }
 
+      // Cash-flow direction accumulation
+      const direction = entry.direction || "NONE";
+      if (direction === "INFLOW") {
+        current.inflow = roundAmount(current.inflow + line.amount);
+        current.netFlow = roundAmount(current.netFlow + line.amount);
+      } else if (direction === "OUTFLOW") {
+        current.outflow = roundAmount(current.outflow + line.amount);
+        current.netFlow = roundAmount(current.netFlow - line.amount);
+      }
+
       current.entries.push({
         journalEntryId: entry._id,
         reference: entry.reference,
@@ -169,6 +198,7 @@ function buildAccountSummaries(journalEntries = []) {
         occurredAt: entry.occurredAt,
         side: line.side,
         amount: line.amount,
+        direction,
         counterpartyName: entry.counterpartyName,
       });
       accountMap.set(line.accountCode, current);
@@ -272,7 +302,7 @@ exports.recordPurchaseInvoiceApproved = async (invoice) => {
   // Credit notes are recorded separately via PAYABLE_CREDIT entries.
   const outstanding = roundAmount(Math.max(0, totalTtc - creditNoteAmount));
 
-  return FinanceEntry.findOneAndUpdate(
+  const entry = await FinanceEntry.findOneAndUpdate(
     { sourceType: "PURCHASE_INVOICE_APPROVED", sourceId: String(invoice._id) },
     {
       $setOnInsert: {
@@ -304,6 +334,25 @@ exports.recordPurchaseInvoiceApproved = async (invoice) => {
     },
     { returnDocument: "after", upsert: true }
   );
+
+  // Notify finance that a supplier invoice is pending payment
+  if (outstanding > 0) {
+    Notification.create({
+      module: "FINANCE",
+      eventType: "PAYABLE_PENDING",
+      title: `Facture fournisseur à régler : ${invoice.invoiceNo}`,
+      message: `Une facture fournisseur de ${totalTtc.toFixed(3)} TND est approuvée et en attente de règlement.`,
+      metadata: {
+        invoiceNo: invoice.invoiceNo,
+        invoiceId: String(invoice._id),
+        supplierId: String(invoice.supplierId),
+        amount: totalTtc,
+        dueDate: invoice.dueDate || null,
+      },
+    }).catch(() => {});
+  }
+
+  return entry;
 };
 
 exports.recordPurchasePayment = async ({ payment, invoice }) => {
@@ -526,15 +575,35 @@ const CLIENT_INVOICE_FILTER = {
   ],
 };
 
-exports.getDashboard = async () => {
+exports.getDashboard = async (year) => {
   const clientInvoiceFilter = CLIENT_INVOICE_FILTER;
 
-  const [purchaseInvoices, purchasePayments, customerInvoices, entries] = await Promise.all([
+  // Resolve year window — current year by default
+  const targetYear = Number(year) || new Date().getFullYear();
+  const yearStart  = new Date(targetYear, 0, 1, 0, 0, 0, 0);
+  const yearEnd    = new Date(targetYear + 1, 0, 1, 0, 0, 0, 0);
+
+  // Pick the most reliable date field per doc (invoiceDate/issueDate, falls back to createdAt)
+  const inYear = (doc, field) => {
+    const d = doc[field] || doc.createdAt;
+    if (!d) return false;
+    const ts = new Date(d).getTime();
+    return ts >= yearStart.getTime() && ts < yearEnd.getTime();
+  };
+
+  const [purchaseInvoicesAll, purchasePaymentsAll, customerInvoicesAll, entries] = await Promise.all([
     PurchaseInvoice.find().populate("supplierId", "supplierNo name"),
     PurchasePayment.find().populate("supplierId", "supplierNo name"),
     CustomerInvoice.find(clientInvoiceFilter).sort({ createdAt: -1 }),
-    FinanceEntry.find().sort({ occurredAt: -1, createdAt: -1 }).limit(8),
+    FinanceEntry.find({ occurredAt: { $gte: yearStart, $lt: yearEnd } })
+      .sort({ occurredAt: -1, createdAt: -1 })
+      .limit(8),
   ]);
+
+  // Year-scope filter
+  const purchaseInvoices = purchaseInvoicesAll.filter((inv) => inYear(inv, "invoiceDate"));
+  const purchasePayments = purchasePaymentsAll.filter((p)   => inYear(p,   "paymentDate"));
+  const customerInvoices = customerInvoicesAll.filter((inv) => inYear(inv, "issueDate"));
 
   const payableInvoices = purchaseInvoices.filter((inv) =>
     ["APPROVED", "PARTIALLY_PAID", "PAID"].includes(inv.status)
@@ -581,7 +650,16 @@ exports.getDashboard = async () => {
     return outstanding > 0 && inv.dueDate && new Date(inv.dueDate) < new Date();
   }).length;
 
+  // Total monthly salary commitment (active + on-leave employees)
+  const salaryAgg = await User.aggregate([
+    { $match: { status: { $in: ["Active", "On Leave"] }, salary: { $gt: 0 } } },
+    { $group: { _id: null, totalSalary: { $sum: "$salary" }, employeeCount: { $sum: 1 } } },
+  ]);
+  const totalSalary = roundAmount(salaryAgg[0]?.totalSalary || 0);
+  const salariedEmployees = salaryAgg[0]?.employeeCount || 0;
+
   return {
+    year: targetYear,
     totals: {
       totalPayablesOutstanding,
       totalPaidOut,
@@ -590,6 +668,8 @@ exports.getDashboard = async () => {
       recognizedRevenue,
       netExpectedCash: roundAmount(totalReceivables - totalPayablesOutstanding),
       overduePayables,
+      totalSalary,
+      salariedEmployees,
     },
     recentEntries: entries,
   };
@@ -735,29 +815,67 @@ exports.getJournal = async () => {
   ].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
 };
 
-exports.getAccounts = async () => {
+exports.getAccounts = async ({ year, month } = {}) => {
+  // Build date range filter (year + optional month)
+  const dateFilter = {};
+  if (year) {
+    const y = Number(year);
+    if (month) {
+      const m = Number(month) - 1;
+      dateFilter.occurredAt = {
+        $gte: new Date(y, m, 1, 0, 0, 0, 0),
+        $lt:  new Date(y, m + 1, 1, 0, 0, 0, 0),
+      };
+    } else {
+      dateFilter.occurredAt = {
+        $gte: new Date(y, 0, 1, 0, 0, 0, 0),
+        $lt:  new Date(y + 1, 0, 1, 0, 0, 0, 0),
+      };
+    }
+  }
+
   // Fetch ALL entries (no limit) for accurate account balances used in reports.
   // getJournal() has a display limit of 500 — do not use it here.
   const [autoEntries, manualEntries] = await Promise.all([
-    FinanceEntry.find().sort({ occurredAt: 1, createdAt: 1 }),
-    ManualJournalEntry.find().sort({ occurredAt: 1, createdAt: 1 }),
+    FinanceEntry.find(dateFilter).sort({ occurredAt: 1, createdAt: 1 }),
+    ManualJournalEntry.find(dateFilter).sort({ occurredAt: 1, createdAt: 1 }),
   ]);
   const all = [
     ...autoEntries.map(toJournalEntry),
     ...manualEntries.map(toManualJournalEntry),
   ];
-  return buildAccountSummaries(all);
+  const accounts = buildAccountSummaries(all);
+
+  // Global cash-flow totals across all entries (entry-level, not line-level — avoids double counting)
+  let totalInflow = 0, totalOutflow = 0;
+  for (const e of all) {
+    if (e.direction === "INFLOW" || e.direction === "OUTFLOW") {
+      // amount = sum of debit side of the entry (= sum of credit side, they balance)
+      const entryAmount = e.lines
+        .filter((l) => l.side === "DEBIT")
+        .reduce((sum, l) => sum + Number(l.amount || 0), 0);
+      if (e.direction === "INFLOW")  totalInflow  = roundAmount(totalInflow  + entryAmount);
+      else                            totalOutflow = roundAmount(totalOutflow + entryAmount);
+    }
+  }
+  const globalTotals = {
+    inflow:  roundAmount(totalInflow),
+    outflow: roundAmount(totalOutflow),
+    netFlow: roundAmount(totalInflow - totalOutflow),
+  };
+
+  return { accounts, totals: globalTotals };
 };
 
 exports.getAccountLedger = async (accountCode) => {
-  const accounts = await exports.getAccounts();
+  const { accounts } = await exports.getAccounts();
   const account = accounts.find((item) => item.accountCode === accountCode);
   if (!account) throw Object.assign(new Error("Compte introuvable"), { statusCode: 404 });
   return account;
 };
 
 exports.getReports = async () => {
-  const accounts = await exports.getAccounts();
+  const { accounts } = await exports.getAccounts();
   const getBalance = (code) =>
     accounts.find((item) => item.accountCode === code)?.balance || 0;
 

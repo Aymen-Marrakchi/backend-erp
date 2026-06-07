@@ -13,12 +13,18 @@ function addDays(date, days) {
 }
 
 async function generateInvoiceNo() {
-  const docs = await CustomerInvoice.find({ invoiceNo: /^FC-\d+$/ }).select("invoiceNo").lean();
+  // Match both legacy "FC-0001" and new "FC-0001/ddmmyyyy" patterns
+  const docs = await CustomerInvoice.find({ invoiceNo: /^FC-\d+/ }).select("invoiceNo").lean();
   const max = docs.reduce((m, d) => {
-    const n = parseInt((d.invoiceNo || "").replace("FC-", ""), 10);
+    const match = String(d.invoiceNo || "").match(/^FC-(\d+)/);
+    const n = match ? parseInt(match[1], 10) : NaN;
     return isNaN(n) ? m : Math.max(m, n);
   }, 0);
-  return `FC-${String(max + 1).padStart(4, "0")}`;
+  const now = new Date();
+  const dd   = String(now.getDate()).padStart(2, "0");
+  const mm   = String(now.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(now.getFullYear());
+  return `FC-${String(max + 1).padStart(4, "0")}/${dd}${mm}${yyyy}`;
 }
 
 async function generateChequeReference() {
@@ -41,6 +47,7 @@ const populateInvoice = (query) =>
 function buildLine(line, config) {
   const quantity = Number(line.quantity || 0);
   const inputUnitPrice = roundAmount(Number(line.unitPrice || 0));
+  const discount = Math.min(100, Math.max(0, Number(line.discount || 0)));
   const tvaRate = config.applyTva ? Number(config.tvaRate || 0) : 0;
   const fodecRate = config.applyFodec ? Number(config.fodecRate || 0) : 0;
   const multiplier = 1 + tvaRate / 100 + fodecRate / 100;
@@ -48,12 +55,14 @@ function buildLine(line, config) {
     config.pricingMode === "TTC_BASED"
       ? roundAmount(multiplier > 0 ? inputUnitPrice / multiplier : inputUnitPrice)
       : inputUnitPrice;
-  const subtotalHt = roundAmount(baseUnitHt * quantity);
+  const brutHt = roundAmount(baseUnitHt * quantity);
+  const discountAmount = roundAmount(brutHt * discount / 100);
+  const subtotalHt = roundAmount(brutHt - discountAmount);
   const totalVat = roundAmount(subtotalHt * (tvaRate / 100));
   const totalFodec = roundAmount(subtotalHt * (fodecRate / 100));
   const totalBeforeStamp =
     config.pricingMode === "TTC_BASED"
-      ? roundAmount(inputUnitPrice * quantity)
+      ? roundAmount(inputUnitPrice * quantity * (1 - discount / 100))
       : roundAmount(subtotalHt + totalVat + totalFodec);
 
   return {
@@ -62,6 +71,8 @@ function buildLine(line, config) {
     quantity,
     inputUnitPrice,
     baseUnitHt,
+    discount,
+    discountAmount,
     subtotalHt,
     totalVat,
     totalFodec,
@@ -226,6 +237,7 @@ function recalculateInvoice(invoice, config = {}, defaults = buildTaxDefaults())
           normalized.pricingMode === "TTC_BASED"
             ? line.inputUnitPrice
             : line.baseUnitHt || line.inputUnitPrice,
+        discount: line.discount || 0,
       },
       normalized
     )
